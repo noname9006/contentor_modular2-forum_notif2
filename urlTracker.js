@@ -3,7 +3,21 @@ const UrlStore = require('./urlStore');
 const { logWithTimestamp } = require('./utils');
 
 class UrlTracker {
-    // ... (previous constructor and init methods remain the same)
+    constructor(client) {
+        this.client = client;
+        this.urlStore = new UrlStore();
+        this.urlRegex = /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/g;
+    }
+
+    async init() {
+        try {
+            await this.urlStore.init();
+            logWithTimestamp('URL Tracker initialized successfully', 'INFO');
+        } catch (error) {
+            logWithTimestamp(`Failed to initialize URL Tracker: ${error.message}`, 'ERROR');
+            throw error;
+        }
+    }
 
     async fetchAllUrlsFromChannel(channelId) {
         const channel = await this.client.channels.fetch(channelId).catch(error => {
@@ -20,7 +34,6 @@ class UrlTracker {
 
         try {
             if (channel.type === ChannelType.GuildForum) {
-                // Handle forum channel
                 logWithTimestamp(`Fetching threads from forum channel: ${channelId}`, 'INFO');
                 const threads = await channel.threads.fetch();
                 
@@ -43,7 +56,6 @@ class UrlTracker {
                     });
                 }
             } else {
-                // Handle regular channel
                 logWithTimestamp(`Fetching messages from regular channel: ${channelId}`, 'INFO');
                 const messages = await channel.messages.fetch({ limit: 100 });
                 
@@ -65,7 +77,6 @@ class UrlTracker {
             return [];
         }
 
-        // Remove duplicates
         urls = urls.filter((url, index, self) =>
             index === self.findIndex((t) => t.url === url.url)
         );
@@ -109,12 +120,50 @@ class UrlTracker {
 
             await message.reply({ embeds: [embed] });
         } catch (error) {
-            logWithTimestamp(`Error handling fetch command: ${error.message}`, 'ERROR');
-            await message.reply('An error occurred while fetching URLs');
+            logWithTimestamp(`Error handling command: ${error.message}`, 'ERROR');
+            await message.reply('An error occurred while fetching URLs').catch(() => {});
         }
     }
 
-    // ... (rest of the class methods remain the same)
+    async handleUrlMessage(message, urls) {
+        try {
+            for (const url of urls) {
+                const existingUrl = await this.urlStore.findUrlHistory(url);
+                if (existingUrl) {
+                    const embed = new EmbedBuilder()
+                        .setColor('#ff0000')
+                        .setTitle('Duplicate URL Detected')
+                        .setDescription(`This URL was previously shared on <t:${Math.floor(new Date(existingUrl.timestamp).getTime() / 1000)}:R>`)
+                        .addFields(
+                            { name: 'Original Poster', value: existingUrl.author || 'Unknown' },
+                            { name: 'URL', value: url }
+                        )
+                        .setFooter({
+                            text: 'Botanix Labs',
+                            iconURL: 'https://a-us.storyblok.com/f/1014909/512x512/026e26392f/dark_512-1.png'
+                        })
+                        .setTimestamp();
+
+                    await message.reply({ embeds: [embed] });
+                } else {
+                    await this.urlStore.addUrl(
+                        url,
+                        message.author.id,
+                        message.channel.id,
+                        message.channel.isThread() ? message.channel.id : null,
+                        message.id,
+                        message.author.tag
+                    );
+                }
+            }
+        } catch (error) {
+            logWithTimestamp(`Error handling URL message: ${error.message}`, 'ERROR');
+        }
+    }
+
+    shutdown() {
+        logWithTimestamp('URL Tracker shutting down...', 'SHUTDOWN');
+    }
 }
 
 module.exports = UrlTracker;

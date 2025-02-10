@@ -38,23 +38,24 @@ class UrlStore {
         await fs.writeFile(this.dataFile, JSON.stringify(this.data, null, 2), 'utf8');
     }
 
-    async addUrl(url, userId, channelId, messageId) {
-        if (!this.initialized) await this.init();
+    async addUrl(url, userId, channelId, threadId = null, messageId, author = 'Unknown') {
+    if (!this.initialized) await this.init();
 
-        const urlEntry = {
-            url,
-            userId,
-            channelId,
-            messageId,
-            timestamp: new Date().toISOString()
-        };
+    const urlEntry = {
+        url,
+        userId,
+        channelId,
+        threadId,
+        messageId,
+        author,
+        timestamp: new Date().toISOString()
+    };
 
-        this.data.urls.push(urlEntry);
-        await this.saveData();
-        logWithTimestamp(`URL added to store: ${url}`, 'INFO');
-        return urlEntry;
-    }
-
+    this.data.urls.push(urlEntry);
+    await this.saveData();
+    logWithTimestamp(`URL added to store: ${url} by ${author}`, 'INFO');
+    return urlEntry;
+}
     async findUrlHistory(url) {
         if (!this.initialized) await this.init();
 
