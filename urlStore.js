@@ -44,9 +44,7 @@ class UrlStorage {
                 }
             });
 
-            // Sort by timestamp in descending order
             updatedUrls.sort((a, b) => b.timestamp - a.timestamp);
-
             this.urls.set(channelId, updatedUrls);
             
             const urlData = Object.fromEntries(this.urls);
@@ -58,6 +56,50 @@ class UrlStorage {
             logWithTimestamp(`Error saving URLs: ${error.message}`, 'ERROR');
             return 0;
         }
+    }
+
+    // Add the missing findUrlHistory method
+    async findUrlHistory(url) {
+        if (!this.isInitialized) {
+            logWithTimestamp('URL storage not initialized', 'ERROR');
+            return null;
+        }
+
+        for (const [channelId, urls] of this.urls.entries()) {
+            const foundUrl = urls.find(entry => entry.url === url);
+            if (foundUrl) {
+                logWithTimestamp(`URL history found for: ${url}`, 'INFO');
+                return foundUrl;
+            }
+        }
+
+        logWithTimestamp(`No URL history found for: ${url}`, 'INFO');
+        return null;
+    }
+
+    // Add the missing addUrl method
+    async addUrl(url, userId, channelId, threadId = null, messageId, author = 'Unknown') {
+        if (!this.isInitialized) {
+            logWithTimestamp('URL storage not initialized', 'ERROR');
+            return null;
+        }
+
+        const urlEntry = {
+            url,
+            userId,
+            channelId,
+            threadId,
+            messageId,
+            author,
+            timestamp: Date.now()
+        };
+
+        const existingUrls = this.urls.get(channelId) || [];
+        existingUrls.push(urlEntry);
+        await this.saveUrls(channelId, existingUrls);
+
+        logWithTimestamp(`Added URL: ${url} by ${author}`, 'INFO');
+        return urlEntry;
     }
 
     getUrls(channelId) {
@@ -122,4 +164,4 @@ class UrlStorage {
     }
 }
 
-module.exports = UrlStorage;
+module.exports = UrlStorage; // Keep the original export name
