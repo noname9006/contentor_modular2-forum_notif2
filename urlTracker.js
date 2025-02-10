@@ -1,6 +1,7 @@
 const { EmbedBuilder, ChannelType } = require('discord.js');
 const UrlStore = require('./urlStore');
 const { logWithTimestamp } = require('./utils');
+const { DB_TIMEOUT } = require('./notificator2');
 
 class UrlTracker {
     constructor(client) {
@@ -126,10 +127,10 @@ class UrlTracker {
     }
 
     async handleUrlMessage(message, urls) {
-        try {
-            for (const url of urls) {
-                const existingUrl = await this.urlStore.findUrlHistory(url);
-                if (existingUrl) {
+    try {
+        for (const url of urls) {
+            const existingUrl = await this.urlStore.findUrlHistory(url);
+            if (existingUrl) {
                     const embed = new EmbedBuilder()
                         .setColor('#ff0000')
                         .setTitle('Duplicate URL Detected')
@@ -146,20 +147,38 @@ class UrlTracker {
 
                     await message.reply({ embeds: [embed] });
                 } else {
-                    await this.urlStore.addUrl(
-                        url,
-                        message.author.id,
-                        message.channel.id,
-                        message.channel.isThread() ? message.channel.id : null,
-                        message.id,
-                        message.author.tag
-                    );
-                }
+                // Wait for DB_TIMEOUT period before adding to database
+                setTimeout(async () => {
+                    try {
+                        // Fetch the message again to verify it still exists
+                        const messageExists = await message.channel.messages.fetch(message.id)
+                            .then(() => true)
+                            .catch(() => false);
+
+                        if (messageExists) {
+                            // Only add to database if message still exists
+                            await this.urlStore.addUrl(
+                                url,
+                                message.author.id,
+                                message.channel.id,
+                                message.channel.isThread() ? message.channel.id : null,
+                                message.id,
+                                message.author.tag
+                            );
+                            logWithTimestamp(`URL added after timeout: ${url}`, 'INFO');
+                        } else {
+                            logWithTimestamp(`Message no longer exists, URL not added: ${url}`, 'INFO');
+                        }
+                    } catch (error) {
+                        logWithTimestamp(`Error checking message after timeout: ${error.message}`, 'ERROR');
+                    }
+                }, DB_TIMEOUT); // Use the DB_TIMEOUT value that's already defined
             }
-        } catch (error) {
-            logWithTimestamp(`Error handling URL message: ${error.message}`, 'ERROR');
         }
+    } catch (error) {
+        logWithTimestamp(`Error handling URL message: ${error.message}`, 'ERROR');
     }
+}
 
     shutdown() {
         logWithTimestamp('URL Tracker shutting down...', 'SHUTDOWN');

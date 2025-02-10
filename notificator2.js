@@ -2,6 +2,13 @@ require('dotenv').config();
 const { Client, GatewayIntentBits, EmbedBuilder, Partials, ChannelType } = require('discord.js');
 const UrlTracker = require('./urlTracker');
 const { logWithTimestamp } = require('./utils');
+const DB_TIMEOUT_MINUTES = parseInt(process.env.DB_TIMEOUT) || 1; // Default to 1 minute
+const DB_TIMEOUT = DB_TIMEOUT_MINUTES * 60 * 1000; // Convert to milliseconds
+const MAX_TEXT_LENGTH = 200;
+const ERROR_COLOR = '#f2b518';
+const RATE_LIMIT_COOLDOWN = 1000;
+const AUTO_DELETE_TIMER_SECONDS = parseInt(process.env.AUTO_DELETE_TIMER) || 30;
+const AUTO_DELETE_TIMER = AUTO_DELETE_TIMER_SECONDS * 1000;
 
 const client = new Client({
     intents: [
@@ -12,15 +19,6 @@ const client = new Client({
     ],
     partials: [Partials.Message, Partials.Channel, Partials.User]
 });
-
-// Constants
-const MAX_TEXT_LENGTH = 200;
-const ERROR_COLOR = '#f2b518';
-const RATE_LIMIT_COOLDOWN = 1000;
-const AUTO_DELETE_TIMER_SECONDS = parseInt(process.env.AUTO_DELETE_TIMER) || 30;
-const AUTO_DELETE_TIMER = AUTO_DELETE_TIMER_SECONDS * 1000;
-const DB_TIMEOUT_MINUTES = parseInt(process.env.DB_TIMEOUT) || 1;
-const DB_TIMEOUT = DB_TIMEOUT_MINUTES * 60 * 1000;
 
 function findHighestRole(memberRoles) {
     for (let i = 5; i >= 0; i--) {
@@ -335,3 +333,6 @@ client.login(process.env.DISCORD_TOKEN).catch(error => {
     logWithTimestamp(`Login failed: ${error.message}`, 'FATAL');
     process.exit(1);
 });
+module.exports = {
+    DB_TIMEOUT,
+   };
