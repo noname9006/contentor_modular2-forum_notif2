@@ -1,14 +1,7 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, EmbedBuilder, Partials, ChannelType } = require('discord.js');
-const UrlTracker = require('./urlTracker');
-const { logWithTimestamp } = require('./utils');
-const { DB_TIMEOUT } = require('./config');  // Updated import
-const MAX_TEXT_LENGTH = 200;
-const ERROR_COLOR = '#f2b518';
-const RATE_LIMIT_COOLDOWN = 1000;
-const AUTO_DELETE_TIMER_SECONDS = parseInt(process.env.AUTO_DELETE_TIMER) || 30;
-const AUTO_DELETE_TIMER = AUTO_DELETE_TIMER_SECONDS * 1000;
+const { Client, GatewayIntentBits, EmbedBuilder, Partials } = require('discord.js');
 
+// Initialize Discord client with required intents
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -19,38 +12,36 @@ const client = new Client({
     partials: [Partials.Message, Partials.Channel, Partials.User]
 });
 
+// Constants
+const MAX_TEXT_LENGTH = 200;
+const ERROR_COLOR = '#f2b518';
+const RATE_LIMIT_COOLDOWN = 1000; // 1 seconds
+const AUTO_DELETE_TIMER_SECONDS = parseInt(process.env.AUTO_DELETE_TIMER) || 30; // Default to 30 seconds
+const AUTO_DELETE_TIMER = AUTO_DELETE_TIMER_SECONDS * 1000; // Convert to milliseconds
+
+// Utility function for logging with timestamp
+function logWithTimestamp(message, type = 'INFO') {
+    const date = new Date();
+    const timestamp = date.toISOString()
+        .replace('T', ' ')      // Replace T with space
+        .replace(/\.\d+Z$/, ''); // Remove milliseconds and Z
+    console.log(`[${timestamp}] [${type}] ${message}`);
+}
+
+// Function to find highest role index (0-5) from user's roles
 function findHighestRole(memberRoles) {
+    // Loop through roles from highest (5) to lowest (0)
     for (let i = 5; i >= 0; i--) {
         const roleId = process.env[`ROLE_${i}_ID`];
         if (memberRoles.has(roleId)) {
             return i;
         }
     }
-    return -1;
+    return -1; // No matching role found
 }
 
+// Rate limiting
 const rateLimitMap = new Map();
-
-let initialized = false;
-
-// In the ready event
-client.once('ready', async () => {
-    try {
-        if (initialized) return;
-        await urlTracker.init();
-        initialized = true;
-        logWithTimestamp('Bot is ready and online!', 'STARTUP');
-        logWithTimestamp(`Auto-delete timer: ${AUTO_DELETE_TIMER_SECONDS}s`, 'CONFIG');
-        
-        for (const threadId of threadToRole.keys()) {
-            const threadName = await getThreadName(threadId);
-            logWithTimestamp(`Monitoring: ${threadName}`, 'CONFIG');
-        }
-    } catch (error) {
-        logWithTimestamp(`Error during initialization: ${error.message}`, 'FATAL');
-        process.exit(1);
-    }
-});
 
 function checkRateLimit(userId) {
     const now = Date.now();
@@ -65,6 +56,7 @@ function checkRateLimit(userId) {
     return false;
 }
 
+// Environment variable validation
 function validateEnvironmentVariables() {
     const requiredVariables = [
         'DISCORD_TOKEN',
@@ -80,8 +72,7 @@ function validateEnvironmentVariables() {
         'THREAD_3_ID',
         'THREAD_4_ID',
         'THREAD_5_ID',
-        'AUTO_DELETE_TIMER',
-        'DB_TIMEOUT'
+        'AUTO_DELETE_TIMER'
     ];
 
     const missingVariables = requiredVariables.filter(varName => !process.env[varName]);
@@ -90,6 +81,7 @@ function validateEnvironmentVariables() {
         process.exit(1);
     }
 
+    // Validate Discord IDs
     const idVariables = Object.keys(process.env).filter(key => 
         (key.startsWith('ROLE_') || key.startsWith('THREAD_')) && key.endsWith('_ID')
     );
@@ -102,36 +94,44 @@ function validateEnvironmentVariables() {
         }
     });
 
+    // Validate AUTO_DELETE_TIMER
     const timer = parseInt(process.env.AUTO_DELETE_TIMER);
-    const dbTimeout = parseInt(process.env.DB_TIMEOUT);
     if (isNaN(timer) || timer < 0) {
         logWithTimestamp('Invalid AUTO_DELETE_TIMER value. Must be a positive number of seconds.', 'ERROR');
         process.exit(1);
     }
-    if (isNaN(dbTimeout) || dbTimeout < 0) {
-        logWithTimestamp('Invalid DB_TIMEOUT value. Must be a positive number of minutes.', 'ERROR');
-        process.exit(1);
-    }
 }
 
-const roleToThread = new Map();
-const threadToRole = new Map();
+// Create mappings for roles and threads
+const roleToThread = new Map([
+    [process.env.ROLE_0_ID, process.env.THREAD_0_ID],
+    [process.env.ROLE_1_ID, process.env.THREAD_1_ID],
+    [process.env.ROLE_2_ID, process.env.THREAD_2_ID],
+    [process.env.ROLE_3_ID, process.env.THREAD_3_ID],
+    [process.env.ROLE_4_ID, process.env.THREAD_4_ID],
+    [process.env.ROLE_5_ID, process.env.THREAD_5_ID]
+]);
 
-for (let i = 0; i <= 5; i++) {
-    const roleId = process.env[`ROLE_${i}_ID`];
-    const threadId = process.env[`THREAD_${i}_ID`];
-    roleToThread.set(roleId, threadId);
-    threadToRole.set(threadId, roleId);
-}
+const threadToRole = new Map([
+    [process.env.THREAD_0_ID, process.env.ROLE_0_ID],
+    [process.env.THREAD_1_ID, process.env.ROLE_1_ID],
+    [process.env.THREAD_2_ID, process.env.ROLE_2_ID],
+    [process.env.THREAD_3_ID, process.env.ROLE_3_ID],
+    [process.env.THREAD_4_ID, process.env.ROLE_4_ID],
+    [process.env.THREAD_5_ID, process.env.ROLE_5_ID]
+]);
 
+// Create a Set of ignored roles
 const ignoredRoles = new Set(
     process.env.IGNORED_ROLES
         ? process.env.IGNORED_ROLES.split(',').map(role => role.trim())
         : []
 );
 
+// Cache for thread names
 const threadNameCache = new Map();
 
+// Utility function for getting thread name with caching
 async function getThreadName(threadId) {
     if (threadNameCache.has(threadId)) {
         return threadNameCache.get(threadId);
@@ -139,15 +139,20 @@ async function getThreadName(threadId) {
 
     try {
         const channel = await client.channels.fetch(threadId);
-        if (!channel) return threadId;
+        if (!channel) {
+            logWithTimestamp(`Thread ${threadId} not found`, 'ERROR');
+            return threadId;
+        }
         const threadName = channel.name;
         threadNameCache.set(threadId, threadName);
         return threadName;
     } catch (error) {
+        logWithTimestamp(`Error fetching thread ${threadId}: ${error.message}`, 'ERROR');
         return threadId;
     }
 }
 
+// Check bot permissions in channel
 function checkBotPermissions(guild, channel) {
     const botMember = guild.members.cache.get(client.user.id);
     if (!botMember) {
@@ -171,74 +176,65 @@ function checkBotPermissions(guild, channel) {
     return true;
 }
 
-const urlTracker = new UrlTracker(client);
-
+// Event handler for when the bot is ready
 client.once('ready', async () => {
-    try {
-        await urlTracker.init();
-        logWithTimestamp('Bot is ready and online!', 'STARTUP');
-        logWithTimestamp(`Auto-delete timer: ${AUTO_DELETE_TIMER_SECONDS}s`, 'CONFIG');
-        
-        for (const threadId of threadToRole.keys()) {
-            const threadName = await getThreadName(threadId);
-            logWithTimestamp(`Monitoring: ${threadName}`, 'CONFIG');
-        }
-    } catch (error) {
-        logWithTimestamp(`Error during initialization: ${error.message}`, 'FATAL');
-        process.exit(1);
+    logWithTimestamp('Bot is ready and online!', 'STARTUP');
+    logWithTimestamp(`Auto-delete timer set to ${AUTO_DELETE_TIMER_SECONDS} seconds`, 'CONFIG');
+    
+    // Initialize thread name cache and log monitored threads
+    for (const threadId of threadToRole.keys()) {
+        const threadName = await getThreadName(threadId);
+        logWithTimestamp(`Monitoring thread: ${threadName}`, 'CONFIG');
     }
 });
 
+// Main message handler
 client.on('messageCreate', async (message) => {
     try {
+        // Basic checks
         if (message.author.bot) return;
         if (!message.guild || !message.member) return;
+        if (!threadToRole.has(message.channel.id)) return;
 
-        // Handle URL fetch command first
-        if (message.content.startsWith('!fetch links')) {
-            try {
-                await urlTracker.handleCommand(message);
-            } catch (error) {
-                logWithTimestamp(`Error handling fetch command: ${error.message}`, 'ERROR');
-                await message.reply('An error occurred while fetching URLs').catch(() => {});
-            }
+        const threadName = await getThreadName(message.channel.id);
+        logWithTimestamp(`Message received in "${threadName}" from ${message.author.tag}`, 'MESSAGE');
+
+        // Rate limit check
+        if (checkRateLimit(message.author.id)) {
             return;
         }
 
-        // Check for URLs in any message
-        const urls = message.content.match(urlTracker.urlRegex);
-        if (urls) {
-            try {
-                await urlTracker.handleUrlMessage(message, urls);
-            } catch (error) {
-                logWithTimestamp(`Error handling URLs: ${error.message}`, 'ERROR');
-            }
-        }
-        // If not in a monitored thread, we're done
-        if (!threadToRole.has(message.channel.id)) return;
-
-        // Rate limit check
-        if (checkRateLimit(message.author.id)) return;
-
         // Permission check
-        if (!checkBotPermissions(message.guild, message.channel)) return;
+        if (!checkBotPermissions(message.guild, message.channel)) {
+            return;
+        }
 
         // Check for ignored roles
         const hasIgnoredRole = message.member.roles.cache.some(role => 
             ignoredRoles.has(role.id)
         );
-        if (hasIgnoredRole) return;
+        if (hasIgnoredRole) {
+            logWithTimestamp(`User ${message.author.tag} has an ignored role - message allowed in "${threadName}"`, 'ROLE');
+            return;
+        }
 
         // Find user's highest role
         const highestRoleIndex = findHighestRole(message.member.roles.cache);
-        if (highestRoleIndex === -1) return;
+        if (highestRoleIndex === -1) {
+            logWithTimestamp(`User ${message.author.tag} has no matching roles`, 'ROLE');
+            return;
+        }
 
+        // Get the thread ID that matches the user's highest role
         const correctThreadId = process.env[`THREAD_${highestRoleIndex}_ID`];
         
-        // If in correct thread, we're done
-        if (message.channel.id === correctThreadId) return;
+        // If user is posting in the correct thread for their highest role, allow it
+        if (message.channel.id === correctThreadId) {
+            logWithTimestamp(`User ${message.author.tag} posted in correct thread for their highest role`, 'ACCESS');
+            return;
+        }
 
-        // Handle wrong thread posting
+        // Prepare embed content
         const hasAttachments = message.attachments.size > 0;
         let embedDescription = hasAttachments 
             ? 'User uploaded file(s)'
@@ -246,6 +242,7 @@ client.on('messageCreate', async (message) => {
                 ? message.content.substring(0, MAX_TEXT_LENGTH) + '...'
                 : message.content || 'No content';
 
+        // Create error embed
         const errorEmbed = new EmbedBuilder()
             .setColor(ERROR_COLOR)
             .setDescription(`${message.author}, please use the thread that matches your highest role.
@@ -267,68 +264,76 @@ Your message has been removed because it was posted to a wrong thread.`)
             .setTimestamp();
 
         try {
-            const replyMessage = await message.reply({ embeds: [errorEmbed] });
+            logWithTimestamp(`User ${message.author.tag} posted in wrong thread "${threadName}"`, 'WARNING');
             
+            // Send reply and handle message deletion
+            const replyMessage = await message.reply({
+                embeds: [errorEmbed]
+            });
+
+            // Wait briefly before deleting
+            await new Promise(resolve => setTimeout(resolve, 500));
+
             if (message.deletable) {
                 await message.delete();
+                logWithTimestamp(`Deleted message from ${message.author.tag} in "${threadName}"`, 'MODERATION');
             }
 
-            if (AUTO_DELETE_TIMER > 0) {
+            // Delete reply after the configured time
+            if (AUTO_DELETE_TIMER_SECONDS > 0) {
                 setTimeout(async () => {
                     try {
                         if (replyMessage.deletable) {
                             await replyMessage.delete();
+                            logWithTimestamp(`Deleted reply message in "${threadName}"`, 'CLEANUP');
                         }
-                    } catch (error) {
-                        // Silent error handling for cleanup
+                    } catch (deleteError) {
+                        logWithTimestamp(`Failed to delete reply message: ${deleteError.message}`, 'ERROR');
                     }
                 }, AUTO_DELETE_TIMER);
             }
-        } catch (error) {
+        } catch (replyError) {
+            logWithTimestamp(`Failed to reply to message: ${replyError.message}`, 'ERROR');
+            
+            // Just try to delete the message if possible
             if (message.deletable) {
                 try {
                     await message.delete();
-                } catch (error) {
-                    // Silent error handling for cleanup
+                    logWithTimestamp(`Deleted message from ${message.author.tag}`, 'MODERATION');
+                } catch (deleteError) {
+                    logWithTimestamp(`Failed to delete message: ${deleteError.message}`, 'ERROR');
                 }
             }
         }
     } catch (error) {
         logWithTimestamp(`Error processing message: ${error.message}`, 'ERROR');
+        logWithTimestamp(`Error stack: ${error.stack}`, 'ERROR');
     }
 });
 
+// Error handling
 client.on('error', error => {
     logWithTimestamp(`Client error: ${error.message}`, 'ERROR');
 });
 
-process.on('uncaughtException', error => {
-    logWithTimestamp(`Fatal error: ${error.message}`, 'FATAL');
-    process.exit(1);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-    logWithTimestamp(`Unhandled rejection: ${reason}`, 'FATAL');
-    process.exit(1);
-});
-
+// Graceful shutdown handling
 process.on('SIGINT', () => {
-    logWithTimestamp('Shutting down...', 'SHUTDOWN');
-    urlTracker.shutdown();
+    logWithTimestamp('Received SIGINT. Shutting down gracefully...', 'SHUTDOWN');
     client.destroy();
     process.exit(0);
 });
 
 process.on('SIGTERM', () => {
-    logWithTimestamp('Shutting down...', 'SHUTDOWN');
-    urlTracker.shutdown();
+    logWithTimestamp('Received SIGTERM. Shutting down gracefully...', 'SHUTDOWN');
     client.destroy();
     process.exit(0);
 });
 
+// Validate environment variables before starting
 validateEnvironmentVariables();
 
+// Connect to Discord
 client.login(process.env.DISCORD_TOKEN).catch(error => {
-    logWithTimestamp(`Login failed: ${error.message}`, 'FATAL');
+    logWithTimestamp(`Failed to login: ${error.message}`, 'FATAL');
     process.exit(1);
 });

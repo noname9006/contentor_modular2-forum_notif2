@@ -1,7 +1,7 @@
 const { EmbedBuilder, ChannelType } = require('discord.js');
 const UrlStore = require('./urlStore');
 const { logWithTimestamp } = require('./utils');
-const { DB_TIMEOUT } = require('./notificator2');
+const { DB_TIMEOUT } = require('./config');
 
 class UrlTracker {
     constructor(client) {
