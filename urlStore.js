@@ -1,91 +1,125 @@
-const fs = require('fs').promises;
+const fs = require('fs/promises');
 const path = require('path');
 const { logWithTimestamp } = require('./utils');
 
-class UrlStore {
+class UrlStorage {
     constructor() {
-        this.dataFile = path.join(__dirname, 'url_data.json');
-        this.data = {
-            urls: []
-        };
-        this.initialized = false;
+        this.urls = new Map();
+        this.storageFile = path.join(__dirname, 'data', 'urls.json');
+        this.isInitialized = false;
     }
 
     async init() {
         try {
-            await this.loadData();
-            this.initialized = true;
-            logWithTimestamp('URL store initialized successfully', 'INFO');
+            await fs.mkdir(path.join(__dirname, 'data'), { recursive: true });
+            const data = await fs.readFile(this.storageFile, 'utf8').catch(() => '{}');
+            const urlData = JSON.parse(data);
+            
+            for (const [channelId, urls] of Object.entries(urlData)) {
+                this.urls.set(channelId, urls);
+            }
+            
+            this.isInitialized = true;
+            logWithTimestamp('URL storage initialized', 'STARTUP');
         } catch (error) {
-            if (error.code === 'ENOENT') {
-                // File doesn't exist yet, create it
-                await this.saveData();
-                this.initialized = true;
-                logWithTimestamp('Created new URL store', 'INFO');
-            } else {
-                logWithTimestamp(`Error initializing URL store: ${error.message}`, 'ERROR');
-                throw error;
+            logWithTimestamp(`Error initializing URL storage: ${error.message}`, 'ERROR');
+            this.urls = new Map();
+            this.isInitialized = false;
+        }
+    }
+
+    async saveUrls(channelId, newUrls) {
+        if (!this.isInitialized) {
+            logWithTimestamp('URL storage not initialized', 'ERROR');
+            return;
+        }
+
+        try {
+            const existingUrls = this.urls.get(channelId) || [];
+            const updatedUrls = [...existingUrls];
+
+            newUrls.forEach(newUrl => {
+                if (!updatedUrls.some(existing => existing.url === newUrl.url)) {
+                    updatedUrls.push(newUrl);
+                }
+            });
+
+            // Sort by timestamp in descending order
+            updatedUrls.sort((a, b) => b.timestamp - a.timestamp);
+
+            this.urls.set(channelId, updatedUrls);
+            
+            const urlData = Object.fromEntries(this.urls);
+            await fs.writeFile(this.storageFile, JSON.stringify(urlData, null, 2));
+            
+            logWithTimestamp(`Saved ${newUrls.length} URLs for channel ${channelId}`, 'INFO');
+            return updatedUrls.length;
+        } catch (error) {
+            logWithTimestamp(`Error saving URLs: ${error.message}`, 'ERROR');
+            return 0;
+        }
+    }
+
+    getUrls(channelId) {
+        if (!this.isInitialized) {
+            logWithTimestamp('URL storage not initialized', 'ERROR');
+            return [];
+        }
+        return this.urls.get(channelId) || [];
+    }
+
+    async cleanup() {
+        if (!this.isInitialized) {
+            logWithTimestamp('URL storage not initialized', 'ERROR');
+            return;
+        }
+
+        const maxAge = 30 * 24 * 60 * 60 * 1000; // 30 days
+        const now = Date.now();
+        let totalRemoved = 0;
+
+        for (const [channelId, urls] of this.urls.entries()) {
+            const originalLength = urls.length;
+            const filteredUrls = urls.filter(url => now - url.timestamp < maxAge);
+            if (filteredUrls.length !== originalLength) {
+                this.urls.set(channelId, filteredUrls);
+                totalRemoved += originalLength - filteredUrls.length;
+            }
+        }
+
+        if (totalRemoved > 0) {
+            try {
+                const urlData = Object.fromEntries(this.urls);
+                await fs.writeFile(this.storageFile, JSON.stringify(urlData, null, 2));
+                logWithTimestamp(`Cleaned up ${totalRemoved} old URLs`, 'INFO');
+            } catch (error) {
+                logWithTimestamp(`Error during URL cleanup: ${error.message}`, 'ERROR');
             }
         }
     }
 
-    async loadData() {
-        const fileContent = await fs.readFile(this.dataFile, 'utf8');
-        this.data = JSON.parse(fileContent);
+    async getAllChannelIds() {
+        return Array.from(this.urls.keys());
     }
 
-    async saveData() {
-        await fs.writeFile(this.dataFile, JSON.stringify(this.data, null, 2), 'utf8');
+    async getStats() {
+        const stats = {
+            totalUrls: 0,
+            channelCount: this.urls.size,
+            urlsPerChannel: {}
+        };
+
+        for (const [channelId, urls] of this.urls.entries()) {
+            stats.totalUrls += urls.length;
+            stats.urlsPerChannel[channelId] = urls.length;
+        }
+
+        return stats;
     }
 
-    async addUrl(url, userId, channelId, threadId = null, messageId, author = 'Unknown') {
-    if (!this.initialized) await this.init();
-
-    const urlEntry = {
-        url,
-        userId,
-        channelId,
-        threadId,
-        messageId,
-        author,
-        timestamp: new Date().toISOString()
-    };
-
-    this.data.urls.push(urlEntry);
-    await this.saveData();
-    logWithTimestamp(`URL added to store: ${url} by ${author}`, 'INFO');
-    return urlEntry;
-}
-    async findUrlHistory(url) {
-        if (!this.initialized) await this.init();
-
-        // Find the earliest instance of this URL
-        const result = this.data.urls
-            .filter(entry => entry.url === url)
-            .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))[0];
-
-        logWithTimestamp(`URL history found: ${result ? result.url : 'none'}`, 'INFO');
-        return result;
-    }
-
-    async fetchChannelUrls(channelId) {
-        if (!this.initialized) await this.init();
-
-        const result = this.data.urls
-            .filter(entry => entry.channelId === channelId || entry.threadId === channelId)
-            .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-
-        logWithTimestamp(`Fetched URLs for channel ${channelId}: ${result.length} found`, 'INFO');
-        return result;
-    }
-
-    async deleteUrl(url) {
-        if (!this.initialized) await this.init();
-
-        this.data.urls = this.data.urls.filter(entry => entry.url !== url);
-        await this.saveData();
-        logWithTimestamp(`URL deleted from store: ${url}`, 'INFO');
+    shutdown() {
+        logWithTimestamp('URL storage shutting down', 'SHUTDOWN');
     }
 }
 
-module.exports = UrlStore;
+module.exports = UrlStorage;
