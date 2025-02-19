@@ -5,13 +5,19 @@ const { logWithTimestamp } = require('./utils');
 class UrlStorage {
     constructor() {
         this.urls = new Map();
-        this.storageFile = path.join(__dirname, 'data', 'urls.json');
+        this.storageFile = '';
         this.isInitialized = false;
     }
 
     async init() {
         try {
-            await fs.mkdir(path.join(__dirname, 'data'), { recursive: true });
+            const mainChannelId = process.env.MAIN_CHANNEL_ID;
+            if (!mainChannelId) {
+                throw new Error('MAIN_CHANNEL_ID environment variable is not set');
+            }
+
+            this.storageFile = path.join(__dirname, `URL_DB_${mainChannelId}.json`);
+            
             const data = await fs.readFile(this.storageFile, 'utf8').catch(() => '{}');
             const urlData = JSON.parse(data);
             
@@ -25,51 +31,35 @@ class UrlStorage {
             logWithTimestamp(`Error initializing URL storage: ${error.message}`, 'ERROR');
             this.urls = new Map();
             this.isInitialized = false;
+            throw error;
         }
     }
 
-    async saveUrls(channelId, newUrls) {
-        if (!this.isInitialized) {
-            logWithTimestamp('URL storage not initialized', 'ERROR');
-            return;
+    // Helper method to check for duplicates across all channels
+    isDuplicateUrl(url) {
+        for (const urls of this.urls.values()) {
+            if (urls.some(entry => entry.url.trim() === url.trim())) {
+                return true;
+            }
         }
-
-        try {
-            const existingUrls = this.urls.get(channelId) || [];
-            const updatedUrls = [...existingUrls];
-
-            newUrls.forEach(newUrl => {
-                if (!updatedUrls.some(existing => existing.url === newUrl.url)) {
-                    updatedUrls.push(newUrl);
-                }
-            });
-
-            updatedUrls.sort((a, b) => b.timestamp - a.timestamp);
-            this.urls.set(channelId, updatedUrls);
-            
-            const urlData = Object.fromEntries(this.urls);
-            await fs.writeFile(this.storageFile, JSON.stringify(urlData, null, 2));
-            
-            logWithTimestamp(`Saved ${newUrls.length} URLs for channel ${channelId}`, 'INFO');
-            return updatedUrls.length;
-        } catch (error) {
-            logWithTimestamp(`Error saving URLs: ${error.message}`, 'ERROR');
-            return 0;
-        }
+        return false;
     }
 
-    // Add the missing findUrlHistory method
     async findUrlHistory(url) {
         if (!this.isInitialized) {
             logWithTimestamp('URL storage not initialized', 'ERROR');
             return null;
         }
 
+        const trimmedUrl = url.trim();
         for (const [channelId, urls] of this.urls.entries()) {
-            const foundUrl = urls.find(entry => entry.url === url);
+            const foundUrl = urls.find(entry => entry.url.trim() === trimmedUrl);
             if (foundUrl) {
-                logWithTimestamp(`URL history found for: ${url}`, 'INFO');
-                return foundUrl;
+                logWithTimestamp(`URL history found for: ${url} in channel ${channelId}`, 'INFO');
+                return {
+                    ...foundUrl,
+                    channelId
+                };
             }
         }
 
@@ -77,15 +67,63 @@ class UrlStorage {
         return null;
     }
 
-    // Add the missing addUrl method
+    async saveUrls(channelId, newUrls) {
+        if (!this.isInitialized) {
+            logWithTimestamp('URL storage not initialized', 'ERROR');
+            return 0;
+        }
+
+        try {
+            const existingUrls = this.urls.get(channelId) || [];
+            const updatedUrls = [...existingUrls];
+            let addedCount = 0;
+
+            for (const newUrl of newUrls) {
+                updatedUrls.push({
+                    ...newUrl,
+                    url: newUrl.url.trim(),
+                    messageUrl: newUrl.messageUrl,
+                    userId: newUrl.userId,
+                    messageId: newUrl.messageId
+                });
+                logWithTimestamp(`Added URL: ${newUrl.url}`, 'INFO');
+                addedCount++;
+            }
+
+            if (addedCount > 0) {
+                updatedUrls.sort((a, b) => b.timestamp - a.timestamp);
+                this.urls.set(channelId, updatedUrls);
+                
+                const urlData = Object.fromEntries(this.urls);
+                await fs.writeFile(this.storageFile, JSON.stringify(urlData, null, 2));
+                
+                // Reload the storage after saving
+                await this.reload();
+                
+                logWithTimestamp(`Saved ${addedCount} URLs for channel ${channelId}`, 'INFO');
+            }
+            
+            return addedCount;
+        } catch (error) {
+            logWithTimestamp(`Error saving URLs: ${error.message}`, 'ERROR');
+            return 0;
+        }
+    }
+
     async addUrl(url, userId, channelId, threadId = null, messageId, author = 'Unknown') {
         if (!this.isInitialized) {
             logWithTimestamp('URL storage not initialized', 'ERROR');
             return null;
         }
 
+        const trimmedUrl = url.trim();
+        if (this.isDuplicateUrl(trimmedUrl)) {
+            logWithTimestamp(`Skipped duplicate URL: ${trimmedUrl}`, 'INFO');
+            return null;
+        }
+
         const urlEntry = {
-            url,
+            url: trimmedUrl,
             userId,
             channelId,
             threadId,
@@ -94,14 +132,41 @@ class UrlStorage {
             timestamp: Date.now()
         };
 
-        const existingUrls = this.urls.get(channelId) || [];
-        existingUrls.push(urlEntry);
-        await this.saveUrls(channelId, existingUrls);
-
-        logWithTimestamp(`Added URL: ${url} by ${author}`, 'INFO');
-        return urlEntry;
+        const addedCount = await this.saveUrls(channelId, [urlEntry]);
+        if (addedCount > 0) {
+            logWithTimestamp(`Added URL: ${trimmedUrl} by ${author}`, 'INFO');
+            return urlEntry;
+        }
+        return null;
     }
 
+    async deleteUrl(url) {
+        if (!this.isInitialized) {
+            logWithTimestamp('URL storage not initialized', 'ERROR');
+            return false;
+        }
+
+        let deleted = false;
+        for (const [channelId, urls] of this.urls.entries()) {
+            const index = urls.findIndex(entry => entry.url.trim() === url.trim());
+            if (index !== -1) {
+                urls.splice(index, 1);
+                const urlData = Object.fromEntries(this.urls);
+                await fs.writeFile(this.storageFile, JSON.stringify(urlData, null, 2));
+                
+                // Reload the storage after deletion
+                await this.reload();
+                
+                deleted = true;
+                logWithTimestamp(`Deleted URL: ${url}`, 'INFO');
+                break;
+            }
+        }
+
+        return deleted;
+    }
+
+    // Get URLs for a specific channel
     getUrls(channelId) {
         if (!this.isInitialized) {
             logWithTimestamp('URL storage not initialized', 'ERROR');
@@ -133,6 +198,10 @@ class UrlStorage {
             try {
                 const urlData = Object.fromEntries(this.urls);
                 await fs.writeFile(this.storageFile, JSON.stringify(urlData, null, 2));
+                
+                // Reload the storage after cleanup
+                await this.reload();
+                
                 logWithTimestamp(`Cleaned up ${totalRemoved} old URLs`, 'INFO');
             } catch (error) {
                 logWithTimestamp(`Error during URL cleanup: ${error.message}`, 'ERROR');
@@ -142,6 +211,27 @@ class UrlStorage {
 
     async getAllChannelIds() {
         return Array.from(this.urls.keys());
+    }
+
+    async reload() {
+        try {
+            if (!this.storageFile) {
+                throw new Error('Storage file path not set. Initialize first.');
+            }
+            
+            const data = await fs.readFile(this.storageFile, 'utf8').catch(() => '{}');
+            const urlData = JSON.parse(data);
+            
+            this.urls.clear();
+            for (const [channelId, urls] of Object.entries(urlData)) {
+                this.urls.set(channelId, urls);
+            }
+            
+            logWithTimestamp('URL storage reloaded', 'INFO');
+        } catch (error) {
+            logWithTimestamp(`Error reloading URL storage: ${error.message}`, 'ERROR');
+            throw error;
+        }
     }
 
     async getStats() {
@@ -158,10 +248,6 @@ class UrlStorage {
 
         return stats;
     }
-
-    shutdown() {
-        logWithTimestamp('URL storage shutting down', 'SHUTDOWN');
-    }
 }
 
-module.exports = UrlStorage; // Keep the original export name
+module.exports = UrlStorage;
