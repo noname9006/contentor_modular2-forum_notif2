@@ -399,15 +399,15 @@ setInterval(() => {
     }
     // Clean up thread name cache
     for (const [threadId, data] of threadNameCache.entries()) {
-        if (now - data.timestamp > THREAD_CACHE_TTL && data.pendingOps === 0) {
+                if (now - data.timestamp > THREAD_CACHE_TTL && data.pendingOps === 0) {
             threadNameCache.delete(threadId);
         }
     }
 }, CACHE_CLEANUP_INTERVAL);
 
-// Create instances
+// Create instances - MODIFIED: Create a single UrlStorage instance and pass it to UrlTracker
 const urlStore = new UrlStorage();
-const urlTracker = new UrlTracker(client);
+const urlTracker = new UrlTracker(client, urlStore); // Pass the existing instance
 
 client.once('ready', async () => {
     try {
@@ -422,11 +422,13 @@ client.once('ready', async () => {
         
         logWithTimestamp('Bot initialized successfully', 'STARTUP');
         logWithTimestamp(`Monitoring forum channel: ${mainChannel.name}`, 'CONFIG');
-        logWithTimestamp(`Last updated: 2025-02-10 19:15:07 UTC by noname9006`, 'INFO');
+        // Remove this line:
+        // logWithTimestamp(`Last updated: 2025-03-12 18:14:35 UTC by noname9006`, 'INFO');
 
-        // Start URL cleanup interval
-        setInterval(() => urlStore.cleanup(), 24 * 60 * 60 * 1000); // Daily cleanup
-		} catch (error) {
+        // URL cleanup has been disabled
+        logWithTimestamp('URL cleanup has been disabled - URLs will be kept forever', 'CONFIG');
+        
+    } catch (error) {
         logWithTimestamp(`Initialization error: ${error.message}`, 'FATAL');
         process.exit(1);
     }

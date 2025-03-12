@@ -4,9 +4,9 @@ const { logWithTimestamp } = require('./utils');
 const { DB_TIMEOUT } = require('./config');
 
 class UrlTracker {
-    constructor(client) {
+    constructor(client, urlStore) {
         this.client = client;
-        this.urlStore = new UrlStorage();
+        this.urlStore = urlStore; // Use the provided instance instead of creating a new one
         this.urlRegex = /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/g;
     }
 
@@ -24,7 +24,7 @@ class UrlTracker {
 
     async init() {
         try {
-            await this.urlStore.init();
+            // No need to initialize urlStore here as it's now passed in from outside
             
             // Sync with all channels in storage
             const channelIds = await this.urlStore.getAllChannelIds();
@@ -40,46 +40,26 @@ class UrlTracker {
     }
 
     async handleUrlMessage(message, urls) {
-    try {
-        const urlsToStore = []; // Add this array to collect new URLs
-        
-        for (const url of urls) {
-            logWithTimestamp(`Checking URL: ${url}`, 'INFO');
-            const existingUrl = await this.urlStore.findUrlHistory(url);
+        try {
+            const urlsToStore = []; // Add this array to collect new URLs
             
-            if (existingUrl) {
-                logWithTimestamp(`Found existing URL: ${url} from author: ${existingUrl.author}`, 'INFO');
+            for (const url of urls) {
+                logWithTimestamp(`Checking URL: ${url}`, 'INFO');
+                const existingUrl = await this.urlStore.findUrlHistory(url);
                 
-                // Check if the original poster is the same as current author
-                if (existingUrl.author !== message.author.tag) {
-                    // Different author - not allowed
-                    const embed = new EmbedBuilder()
-                        .setColor('#ff0000')
-                        .setTitle(`${message.author}, Only your own content is allowed`)
-                        .setDescription(`This URL was previously shared by another user on <t:${Math.floor(new Date(existingUrl.timestamp).getTime() / 1000)}:R>`)
-                        .addFields(
-                            { name: 'Original Poster', value: existingUrl.author || 'Unknown' },
-                            { name: 'Original Channel', value: `<#${existingUrl.channelId}>` },
-                            { name: 'URL', value: url }
-                        )
-                        .setFooter({
-                            text: 'Botanix Labs',
-                            iconURL: 'https://a-us.storyblok.com/f/1014909/512x512/026e26392f/dark_512-1.png'
-                        })
-                        .setTimestamp();
-
-                    await message.reply({ embeds: [embed] });
-                    logWithTimestamp(`Sent duplicate URL notification for: ${url}`, 'INFO');
-                } else {
-                    // Same author - check if same thread
-                    if (existingUrl.channelId !== message.channel.id) {
-                        // Different thread
+                if (existingUrl) {
+                    logWithTimestamp(`Found existing URL: ${url} from author: ${existingUrl.author}`, 'INFO');
+                    
+                    // Check if the original poster is the same as current author
+                    if (existingUrl.author !== message.author.tag) {
+                        // Different author - not allowed
                         const embed = new EmbedBuilder()
                             .setColor('#ff0000')
-                            .setTitle(`${message.author}, You have posted this before`)
-                            .setDescription(`You shared this URL in a different thread on <t:${Math.floor(new Date(existingUrl.timestamp).getTime() / 1000)}:R>`)
+                            .setTitle(`${message.author}, Only your own content is allowed`)
+                            .setDescription(`This URL was previously shared by another user on <t:${Math.floor(new Date(existingUrl.timestamp).getTime() / 1000)}:R>`)
                             .addFields(
-                                { name: 'Original Thread', value: `<#${existingUrl.channelId}>` },
+                                { name: 'Original Poster', value: existingUrl.author || 'Unknown' },
+                                { name: 'Original Channel', value: `<#${existingUrl.channelId}>` },
                                 { name: 'URL', value: url }
                             )
                             .setFooter({
@@ -89,21 +69,17 @@ class UrlTracker {
                             .setTimestamp();
 
                         await message.reply({ embeds: [embed] });
-                        logWithTimestamp(`Sent same-author different-thread notification for: ${url}`, 'INFO');
+                        logWithTimestamp(`Sent duplicate URL notification for: ${url}`, 'INFO');
                     } else {
-                        // Same thread - check if original message exists
-                        const originalMessage = await message.channel.messages
-                            .fetch(existingUrl.messageId)
-                            .catch(() => null);
-
-                        if (originalMessage) {
-                            // Original message still exists
+                        // Same author - check if same thread
+                        if (existingUrl.channelId !== message.channel.id) {
+                            // Different thread
                             const embed = new EmbedBuilder()
                                 .setColor('#ff0000')
                                 .setTitle(`${message.author}, You have posted this before`)
-                                .setDescription(`You already shared this URL in this thread on <t:${Math.floor(new Date(existingUrl.timestamp).getTime() / 1000)}:R>`)
+                                .setDescription(`You shared this URL in a different thread on <t:${Math.floor(new Date(existingUrl.timestamp).getTime() / 1000)}:R>`)
                                 .addFields(
-                                    { name: 'Original Message', value: `[Click to view](${originalMessage.url})` },
+                                    { name: 'Original Thread', value: `<#${existingUrl.channelId}>` },
                                     { name: 'URL', value: url }
                                 )
                                 .setFooter({
@@ -113,54 +89,78 @@ class UrlTracker {
                                 .setTimestamp();
 
                             await message.reply({ embeds: [embed] });
-                            logWithTimestamp(`Sent same-thread notification for: ${url}`, 'INFO');
+                            logWithTimestamp(`Sent same-author different-thread notification for: ${url}`, 'INFO');
                         } else {
-                            // Original message is gone - delete the entry and add to store
-                            await this.urlStore.deleteUrl(url);
-                            logWithTimestamp(`Deleted old URL entry as original message no longer exists: ${url}`, 'INFO');
-                            urlsToStore.push({
-                                url,
-                                timestamp: message.createdTimestamp,
-                                author: message.author.tag,
-                                authorId: message.author.id,
-                                threadName: message.channel.name,
-                                threadId: message.channel.id,
-                                messageId: message.id,
-                                guildId: message.guild.id
-                            });
+                            // Same thread - check if original message exists
+                            const originalMessage = await message.channel.messages
+                                .fetch(existingUrl.messageId)
+                                .catch(() => null);
+
+                            if (originalMessage) {
+                                // Original message still exists
+                                const embed = new EmbedBuilder()
+                                    .setColor('#ff0000')
+                                    .setTitle(`${message.author}, You have posted this before`)
+                                    .setDescription(`You already shared this URL in this thread on <t:${Math.floor(new Date(existingUrl.timestamp).getTime() / 1000)}:R>`)
+                                    .addFields(
+                                        { name: 'Original Message', value: `[Click to view](${originalMessage.url})` },
+                                        { name: 'URL', value: url }
+                                    )
+                                    .setFooter({
+                                        text: 'Botanix Labs',
+                                        iconURL: 'https://a-us.storyblok.com/f/1014909/512x512/026e26392f/dark_512-1.png'
+                                    })
+                                    .setTimestamp();
+
+                                await message.reply({ embeds: [embed] });
+                                logWithTimestamp(`Sent same-thread notification for: ${url}`, 'INFO');
+                            } else {
+                                // Original message is gone - delete the entry and add to store
+                                await this.urlStore.deleteUrl(url);
+                                logWithTimestamp(`Deleted old URL entry as original message no longer exists: ${url}`, 'INFO');
+                                urlsToStore.push({
+                                    url,
+                                    timestamp: message.createdTimestamp,
+                                    author: message.author.tag,
+                                    authorId: message.author.id,
+                                    threadName: message.channel.name,
+                                    threadId: message.channel.id,
+                                    messageId: message.id,
+                                    guildId: message.guild.id
+                                });
+                            }
                         }
                     }
+                } else {
+                    // New URL - add it to store
+                    urlsToStore.push({
+                        url,
+                        timestamp: message.createdTimestamp,
+                        author: message.author.tag,
+                        authorId: message.author.id,
+                        threadName: message.channel.name,
+                        threadId: message.channel.id,
+                        messageId: message.id,
+                        guildId: message.guild.id
+                    });
                 }
-            } else {
-                // New URL - add it to store
-                urlsToStore.push({
-                    url,
-                    timestamp: message.createdTimestamp,
-                    author: message.author.tag,
-                    authorId: message.author.id,
-                    threadName: message.channel.name,
-                    threadId: message.channel.id,
-                    messageId: message.id,
-                    guildId: message.guild.id
-                });
             }
-        }
-        
-        // Store new URLs if any
-        if (urlsToStore.length > 0) {
-            try {
-                await this.urlStore.saveUrls(message.channel.id, urlsToStore);
-            } catch (error) {
-                logWithTimestamp(`Failed to store URLs: ${error.message}`, 'ERROR');
+            
+            // Store new URLs if any
+            if (urlsToStore.length > 0) {
+                try {
+                    await this.urlStore.saveUrls(message.channel.id, urlsToStore);
+                } catch (error) {
+                    logWithTimestamp(`Failed to store URLs: ${error.message}`, 'ERROR');
+                }
             }
+            
+            return urlsToStore; // Return the stored URLs for reference
+        } catch (error) {
+            logWithTimestamp(`Error handling URL message: ${error.message}`, 'ERROR');
+            return [];
         }
-        
-        return urlsToStore; // Return the stored URLs for reference
-    } catch (error) {
-        logWithTimestamp(`Error handling URL message: ${error.message}`, 'ERROR');
-        return [];
     }
-}
 
     async fetchAllUrlsFromChannel(channelId) {
         const channel = await this.client.channels.fetch(channelId).catch(error => {
@@ -226,7 +226,7 @@ class UrlTracker {
 
     shutdown() {
         logWithTimestamp('URL Tracker shutting down...', 'SHUTDOWN');
-        this.urlStore.shutdown();
+        // No need to call urlStore.shutdown() here as it's managed externally
     }
 }
 

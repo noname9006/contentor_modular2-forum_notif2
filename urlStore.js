@@ -176,37 +176,9 @@ class UrlStorage {
     }
 
     async cleanup() {
-        if (!this.isInitialized) {
-            logWithTimestamp('URL storage not initialized', 'ERROR');
-            return;
-        }
-
-        const maxAge = 30 * 24 * 60 * 60 * 1000; // 30 days
-        const now = Date.now();
-        let totalRemoved = 0;
-
-        for (const [channelId, urls] of this.urls.entries()) {
-            const originalLength = urls.length;
-            const filteredUrls = urls.filter(url => now - url.timestamp < maxAge);
-            if (filteredUrls.length !== originalLength) {
-                this.urls.set(channelId, filteredUrls);
-                totalRemoved += originalLength - filteredUrls.length;
-            }
-        }
-
-        if (totalRemoved > 0) {
-            try {
-                const urlData = Object.fromEntries(this.urls);
-                await fs.writeFile(this.storageFile, JSON.stringify(urlData, null, 2));
-                
-                // Reload the storage after cleanup
-                await this.reload();
-                
-                logWithTimestamp(`Cleaned up ${totalRemoved} old URLs`, 'INFO');
-            } catch (error) {
-                logWithTimestamp(`Error during URL cleanup: ${error.message}`, 'ERROR');
-            }
-        }
+        // This method is now disabled
+        logWithTimestamp('URL cleanup is disabled - URLs will be kept forever', 'INFO');
+        return;
     }
 
     async getAllChannelIds() {
@@ -247,6 +219,12 @@ class UrlStorage {
         }
 
         return stats;
+    }
+
+    shutdown() {
+        logWithTimestamp('URL Storage shutting down...', 'SHUTDOWN');
+        this.isInitialized = false;
+        // Any cleanup code if needed
     }
 }
 
