@@ -1,7 +1,7 @@
 const { EmbedBuilder, ChannelType } = require('discord.js');
 const UrlStorage = require('./urlStore');
 const { logWithTimestamp } = require('./utils');
-const { DB_TIMEOUT } = require('./config');
+const { DB_TIMEOUT, THRESHOLD_DUPE_AGE } = require('./config');
 
 class UrlTracker {
     constructor(client, urlStore) {
@@ -115,19 +115,45 @@ class UrlTracker {
                                 await message.reply({ embeds: [embed] });
                                 logWithTimestamp(`Sent same-thread notification for: ${url}`, 'INFO');
                             } else {
-                                // Original message is gone - delete the entry and add to store
-                                await this.urlStore.deleteUrl(url);
-                                logWithTimestamp(`Deleted old URL entry as original message no longer exists: ${url}`, 'INFO');
-                                urlsToStore.push({
-                                    url,
-                                    timestamp: message.createdTimestamp,
-                                    author: message.author.tag,
-                                    authorId: message.author.id,
-                                    threadName: message.channel.name,
-                                    threadId: message.channel.id,
-                                    messageId: message.id,
-                                    guildId: message.guild.id
-                                });
+                                // Original message is gone - check age threshold
+                                const currentTime = Date.now();
+                                const originalTime = existingUrl.timestamp;
+                                const ageInMinutes = (currentTime - originalTime) / (60 * 1000);
+                                
+                                if (ageInMinutes < THRESHOLD_DUPE_AGE) {
+                                    // Less than threshold - treat as new URL
+                                    await this.urlStore.deleteUrl(url);
+                                    logWithTimestamp(`Deleted old URL entry as original message no longer exists and age (${ageInMinutes.toFixed(2)} min) is less than threshold: ${url}`, 'INFO');
+                                    urlsToStore.push({
+                                        url,
+                                        timestamp: message.createdTimestamp,
+                                        author: message.author.tag,
+                                        authorId: message.author.id,
+                                        threadName: message.channel.name,
+                                        threadId: message.channel.id,
+                                        messageId: message.id,
+                                        guildId: message.guild.id
+                                    });
+                                } else {
+                                    // More than threshold - send warning as duplicate
+                                    const embed = new EmbedBuilder()
+                                        .setColor('#ff0000')
+                                        .setTitle(`${message.author}, You have posted this before`)
+                                        .setDescription(`You already shared this URL in this thread on <t:${Math.floor(new Date(existingUrl.timestamp).getTime() / 1000)}:R>`)
+                                        .addFields(
+                                            { name: 'Original Message', value: `Original message was deleted` },
+                                            { name: 'URL', value: url },
+                                            { name: 'Age', value: `${ageInMinutes.toFixed(2)} minutes` }
+                                        )
+                                        .setFooter({
+                                            text: 'Botanix Labs',
+                                            iconURL: 'https://a-us.storyblok.com/f/1014909/512x512/026e26392f/dark_512-1.png'
+                                        })
+                                        .setTimestamp();
+
+                                    await message.reply({ embeds: [embed] });
+                                    logWithTimestamp(`Sent same-thread notification for deleted message with age (${ageInMinutes.toFixed(2)} min) exceeding threshold: ${url}`, 'INFO');
+                                }
                             }
                         }
                     }
