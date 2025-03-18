@@ -1,9 +1,9 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits, EmbedBuilder, Partials, ChannelType } = require('discord.js');
-const UrlStorage = require('./urlStore');  // Changed to UrlStorage
+const UrlStorage = require('./urlStore');
 const UrlTracker = require('./urlTracker');
 const { logWithTimestamp } = require('./utils');
-const { DB_TIMEOUT, RATE_LIMIT_MAX_REQUESTS, RATE_LIMIT_COOLDOWN } = require('./config');
+const { DB_TIMEOUT } = require('./config');
 
 const client = new Client({
     intents: [
@@ -16,7 +16,7 @@ const client = new Client({
 });
 
 // Constants
-const MAX_TEXT_LENGTH = 200;
+const MAX_TEXT_LENGTH = 300;
 const ERROR_COLOR = '#f2b518';
 const AUTO_DELETE_TIMER_SECONDS = parseInt(process.env.AUTO_DELETE_TIMER) || 30;
 const AUTO_DELETE_TIMER = AUTO_DELETE_TIMER_SECONDS * 1000;
@@ -29,25 +29,6 @@ const URL_HISTORY_LIMIT = 10;
 // Rate limiting and caching
 const rateLimitMap = new Map();
 const threadNameCache = new Map(); // Stores {threadId: {name: string, timestamp: number, pendingOps: number}}
-
-function checkRateLimit(userId) {
-    const now = Date.now();
-    const userRateLimit = rateLimitMap.get(userId) || { timestamp: now, count: 0 };
-    
-    if (now - userRateLimit.timestamp > RATE_LIMIT_COOLDOWN) {
-        userRateLimit.timestamp = now;
-        userRateLimit.count = 1;
-    } else {
-        userRateLimit.count++;
-        if (userRateLimit.count > RATE_LIMIT_MAX_REQUESTS) {
-            logWithTimestamp(`Rate limit hit for user ID: ${userId}`, 'RATELIMIT');
-            return true;
-        }
-    }
-    
-    rateLimitMap.set(userId, userRateLimit);
-    return false;
-}
 
 function findHighestRole(memberRoles) {
     for (let i = 5; i >= 0; i--) {
@@ -394,13 +375,7 @@ async function handleFetchLinksCommand(message) {
 // Cache cleanup
 setInterval(() => {
     const now = Date.now();
-    // Clean up rate limit map
-    for (const [userId, timestamp] of rateLimitMap.entries()) {
-        if (now - timestamp > RATE_LIMIT_COOLDOWN * 2) {
-            rateLimitMap.delete(userId);
-        }
-    }
-    // Clean up thread name cache
+        // Clean up thread name cache
     for (const [threadId, data] of threadNameCache.entries()) {
                 if (now - data.timestamp > THREAD_CACHE_TTL && data.pendingOps === 0) {
             threadNameCache.delete(threadId);
