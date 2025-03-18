@@ -56,7 +56,7 @@ class UrlTracker {
         text: 'Botanix Labs',
         iconURL: 'https://a-us.storyblok.com/f/1014909/512x512/026e26392f/dark_512-1.png'
     })
-    .setTimestamp();
+
 
 // Send as a reply instead of a standalone message
 const replyMessage = await message.reply({ embeds: [embed] });
@@ -83,22 +83,22 @@ if (message.deletable) {
                     if (existingUrl.author !== message.author.tag) {
                         // Different author - not allowed
                         const embed = new EmbedBuilder()
-                            .setColor('#ff0000')
-                            .setTitle(`${message.author}, Only your own content is allowed`)
-                            .setDescription(`This URL was previously shared by another user on <t:${Math.floor(new Date(existingUrl.timestamp).getTime() / 1000)}:R>`)
-                            .addFields(
-                                { name: 'Original Poster', value: existingUrl.author || 'Unknown' },
-                                { name: 'Original Channel', value: `<#${existingUrl.channelId}>` },
-                                { name: 'URL', value: url }
-                            )
-                            .setFooter({
-                                text: 'Botanix Labs',
-                                iconURL: 'https://a-us.storyblok.com/f/1014909/512x512/026e26392f/dark_512-1.png'
-                            })
-                            .setTimestamp();
+    .setColor('#ff0000')
+    .setTitle('Please share only your own original content!')
+    .setDescription(`${message.author}, this URL was previously shared by another user`)
+    .addFields(
+    { name: 'Original message:', value: `https://discord.com/channels/${message.guild.id}/${existingUrl.channelId}/${existingUrl.messageId}` },
+        { name: 'URL', value: url }
+    )
+    .setFooter({
+        text: 'Botanix Labs',
+        iconURL: 'https://a-us.storyblok.com/f/1014909/512x512/026e26392f/dark_512-1.png'
+    })
+    .setTimestamp();
 
-                        await message.reply({ embeds: [embed] });
-                        logWithTimestamp(`Sent duplicate URL notification for: ${url}`, 'INFO');
+await message.reply({ embeds: [embed] });
+await message.react('🚫'); // Add no_entry_sign reaction
+logWithTimestamp(`Sent duplicate URL notification for: ${url}`, 'INFO');
                     } else {
                         // Same author - check if same thread
                         if (existingUrl.channelId !== message.channel.id) {
