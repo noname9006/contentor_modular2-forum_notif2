@@ -88,13 +88,12 @@ if (message.deletable) {
     .setDescription(`${message.author}, this URL was previously shared by another user`)
     .addFields(
 	{name: 'Original message:', value: `https://discord.com/channels/${message.guild.id}/${existingUrl.threadId}/${existingUrl.messageId}` },
-        { name: 'URL', value: url }
+        { name: 'URL:', value: url }
     )
     .setFooter({
         text: 'Botanix Labs',
         iconURL: 'https://a-us.storyblok.com/f/1014909/512x512/026e26392f/dark_512-1.png'
     })
-    .setTimestamp();
 
 await message.reply({ embeds: [embed] });
 await message.react('🚫'); // Add no_entry_sign reaction
@@ -105,19 +104,19 @@ logWithTimestamp(`Sent duplicate URL notification for: ${url}`, 'INFO');
                             // Different thread
                             const embed = new EmbedBuilder()
                                 .setColor('#ff0000')
-                                .setTitle(`${message.author}, You have posted this before`)
-                                .setDescription(`You shared this URL in a different thread on <t:${Math.floor(new Date(existingUrl.timestamp).getTime() / 1000)}:R>`)
+                                .setTitle(`You have posted this before`)
+                                .setDescription(`${message.author}, you shared this URL in a different thread`)
                                 .addFields(
-                                    { name: 'Original Thread', value: `<#${existingUrl.channelId}>` },
-                                    { name: 'URL', value: url }
+                                    { name: 'Original message:', value: `https://discord.com/channels/${message.guild.id}/${existingUrl.threadId}/${existingUrl.messageId}` },
+                                    { name: 'URL:', value: url }
                                 )
                                 .setFooter({
                                     text: 'Botanix Labs',
                                     iconURL: 'https://a-us.storyblok.com/f/1014909/512x512/026e26392f/dark_512-1.png'
                                 })
-                                .setTimestamp();
 
                             await message.reply({ embeds: [embed] });
+							await message.react('🚫'); 
                             logWithTimestamp(`Sent same-author different-thread notification for: ${url}`, 'INFO');
                         } else {
                             // Same thread - check if original message exists
@@ -139,7 +138,6 @@ logWithTimestamp(`Sent duplicate URL notification for: ${url}`, 'INFO');
                                         text: 'Botanix Labs',
                                         iconURL: 'https://a-us.storyblok.com/f/1014909/512x512/026e26392f/dark_512-1.png'
                                     })
-                                    .setTimestamp();
 
                                 await message.reply({ embeds: [embed] });
                                 logWithTimestamp(`Sent same-thread notification for: ${url}`, 'INFO');
@@ -180,7 +178,6 @@ logWithTimestamp(`Sent duplicate URL notification for: ${url}`, 'INFO');
                                             text: 'Botanix Labs',
                                             iconURL: 'https://a-us.storyblok.com/f/1014909/512x512/026e26392f/dark_512-1.png'
                                         })
-                                        .setTimestamp();
 
                                     await message.reply({ embeds: [embed] });
                                     logWithTimestamp(`Sent same-thread notification for deleted message with age (${ageInMinutes.toFixed(2)} min) exceeding threshold: ${url}`, 'INFO');
