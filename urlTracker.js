@@ -48,19 +48,25 @@ class UrlTracker {
                     url.toLowerCase().includes(botanixTwitterValue));
                 
                 if (containsBotanixTwitter) {
-                    logWithTimestamp(`Found Botanix Twitter URL: ${urls.join(', ')}`, 'INFO');
-                    const embed = new EmbedBuilder()
-                        .setColor('#ff0000')
-                        .setDescription("Simply resharing Botanix tweets doesn't add much value. Please contribute with your own original content.")
-                        .setFooter({
-                            text: 'Botanix Labs',
-                            iconURL: 'https://a-us.storyblok.com/f/1014909/512x512/026e26392f/dark_512-1.png'
-                        })
-                        .setTimestamp();
+    logWithTimestamp(`Found Botanix Twitter URL: ${urls.join(', ')}`, 'INFO');
+    const embed = new EmbedBuilder()
+        .setColor('#ff0000')
+        .setDescription(`<@${message.author.id}>, simply resharing Botanix tweets doesn't add much value. Please contribute with your own original content.`)
+        .setFooter({
+            text: 'Botanix Labs',
+            iconURL: 'https://a-us.storyblok.com/f/1014909/512x512/026e26392f/dark_512-1.png'
+        })
+        .setTimestamp();
 
-                    await message.reply({ embeds: [embed] });
-                    return [];
-                }
+    const replyMessage = await message.channel.send({ embeds: [embed] });
+    
+    // Delete the user's message
+    if (message.deletable) {
+        await message.delete();
+    }
+    
+    return [];
+}
             }
             
             const urlsToStore = []; // Add this array to collect new URLs
