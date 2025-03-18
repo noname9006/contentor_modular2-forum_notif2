@@ -41,6 +41,28 @@ class UrlTracker {
 
     async handleUrlMessage(message, urls) {
         try {
+            // Scenario 0: Check if any of the URLs contain BOTANIX_TWITTER value
+            if (process.env.BOTANIX_TWITTER && process.env.BOTANIX_TWITTER.trim() !== '') {
+                const botanixTwitterValue = process.env.BOTANIX_TWITTER.trim().toLowerCase();
+                const containsBotanixTwitter = urls.some(url => 
+                    url.toLowerCase().includes(botanixTwitterValue));
+                
+                if (containsBotanixTwitter) {
+                    logWithTimestamp(`Found Botanix Twitter URL: ${urls.join(', ')}`, 'INFO');
+                    const embed = new EmbedBuilder()
+                        .setColor('#ff0000')
+                        .setDescription("Simply resharing Botanix tweets doesn't add much value. Please contribute with your own original content.")
+                        .setFooter({
+                            text: 'Botanix Labs',
+                            iconURL: 'https://a-us.storyblok.com/f/1014909/512x512/026e26392f/dark_512-1.png'
+                        })
+                        .setTimestamp();
+
+                    await message.reply({ embeds: [embed] });
+                    return [];
+                }
+            }
+            
             const urlsToStore = []; // Add this array to collect new URLs
             
             for (const url of urls) {
