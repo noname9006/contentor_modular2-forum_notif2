@@ -50,20 +50,21 @@ class UrlTracker {
                 if (containsBotanixTwitter) {
     logWithTimestamp(`Found Botanix Twitter URL: ${urls.join(', ')}`, 'INFO');
     const embed = new EmbedBuilder()
-        .setColor('#ff0000')
-        .setDescription(`<@${message.author.id}>, simply resharing Botanix tweets doesn't add much value. Please contribute with your own original content.`)
-        .setFooter({
-            text: 'Botanix Labs',
-            iconURL: 'https://a-us.storyblok.com/f/1014909/512x512/026e26392f/dark_512-1.png'
-        })
-        .setTimestamp();
+    .setColor('#ff0000')
+    .setDescription(`<@${message.author.id}>, simply resharing Botanix tweets doesn't add much value\nPlease contribute with your own original content`)
+    .setFooter({
+        text: 'Botanix Labs',
+        iconURL: 'https://a-us.storyblok.com/f/1014909/512x512/026e26392f/dark_512-1.png'
+    })
+    .setTimestamp();
 
-    const replyMessage = await message.channel.send({ embeds: [embed] });
-    
-    // Delete the user's message
-    if (message.deletable) {
-        await message.delete();
-    }
+// Send as a reply instead of a standalone message
+const replyMessage = await message.reply({ embeds: [embed] });
+
+// Delete the user's message
+if (message.deletable) {
+    await message.delete();
+}
     
     return [];
 }
