@@ -46,69 +46,67 @@ class UrlStorage {
     }
 
     async findUrlHistory(url) {
-        if (!this.isInitialized) {
-            logWithTimestamp('URL storage not initialized', 'ERROR');
-            return null;
-        }
-
-        const trimmedUrl = url.trim();
-        for (const [channelId, urls] of this.urls.entries()) {
-            const foundUrl = urls.find(entry => entry.url.trim() === trimmedUrl);
-            if (foundUrl) {
-                logWithTimestamp(`URL history found for: ${url} in channel ${channelId}`, 'INFO');
-                return {
-                    ...foundUrl,
-                    channelId
-                };
-            }
-        }
-
-        logWithTimestamp(`No URL history found for: ${url}`, 'INFO');
+    if (!this.isInitialized) {
+        logWithTimestamp('URL storage not initialized', 'ERROR');
         return null;
     }
 
-    async saveUrls(channelId, newUrls) {
-        if (!this.isInitialized) {
-            logWithTimestamp('URL storage not initialized', 'ERROR');
-            return 0;
-        }
-
-        try {
-            const existingUrls = this.urls.get(channelId) || [];
-            const updatedUrls = [...existingUrls];
-            let addedCount = 0;
-
-            for (const newUrl of newUrls) {
-                updatedUrls.push({
-                    ...newUrl,
-                    url: newUrl.url.trim(),
-                    messageUrl: newUrl.messageUrl,
-                    userId: newUrl.userId,
-                    messageId: newUrl.messageId
-                });
-                logWithTimestamp(`Added URL: ${newUrl.url}`, 'INFO');
-                addedCount++;
-            }
-
-            if (addedCount > 0) {
-                updatedUrls.sort((a, b) => b.timestamp - a.timestamp);
-                this.urls.set(channelId, updatedUrls);
-                
-                const urlData = Object.fromEntries(this.urls);
-                await fs.writeFile(this.storageFile, JSON.stringify(urlData, null, 2));
-                
-                // Reload the storage after saving
-                await this.reload();
-                
-                logWithTimestamp(`Saved ${addedCount} URLs for channel ${channelId}`, 'INFO');
-            }
-            
-            return addedCount;
-        } catch (error) {
-            logWithTimestamp(`Error saving URLs: ${error.message}`, 'ERROR');
-            return 0;
+    const trimmedUrl = url.trim();
+    for (const [channelId, urls] of this.urls.entries()) {
+        const foundUrl = urls.find(entry => entry.url.trim() === trimmedUrl);
+        if (foundUrl) {
+            logWithTimestamp(`URL history found for: ${url} in channel ${channelId}`, 'INFO');
+            return {
+                ...foundUrl,
+                channelId
+            };
         }
     }
+
+    logWithTimestamp(`No URL history found for: ${url}`, 'INFO');
+    return null;
+}
+
+    async saveUrls(channelId, newUrls) {
+    if (!this.isInitialized) {
+        logWithTimestamp('URL storage not initialized', 'ERROR');
+        return 0;
+    }
+
+    try {
+        const existingUrls = this.urls.get(channelId) || [];
+        const updatedUrls = [...existingUrls];
+        let addedCount = 0;
+
+        for (const newUrl of newUrls) {
+            updatedUrls.push({
+                ...newUrl,
+                url: newUrl.url.trim(),
+                messageUrl: newUrl.messageUrl,
+                userId: newUrl.userId,
+                messageId: newUrl.messageId
+            });
+            logWithTimestamp(`Added URL: ${newUrl.url}`, 'INFO');
+            addedCount++;
+        }
+
+        if (addedCount > 0) {
+            // Change this line to sort by ascending timestamp (oldest first)
+            updatedUrls.sort((a, b) => a.timestamp - b.timestamp);
+            this.urls.set(channelId, updatedUrls);
+            
+            const urlData = Object.fromEntries(this.urls);
+            await fs.writeFile(this.storageFile, JSON.stringify(urlData, null, 2));
+            
+            logWithTimestamp(`Saved ${addedCount} URLs for channel ${channelId}`, 'INFO');
+        }
+        
+        return addedCount;
+    } catch (error) {
+        logWithTimestamp(`Error saving URLs: ${error.message}`, 'ERROR');
+        return 0;
+    }
+}
 
     async addUrl(url, userId, channelId, threadId = null, messageId, author = 'Unknown') {
         if (!this.isInitialized) {

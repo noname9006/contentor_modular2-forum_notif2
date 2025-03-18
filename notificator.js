@@ -300,43 +300,46 @@ async function handleFetchLinksCommand(message) {
                         if (foundUrls) {
                             const messageUrl = `https://discord.com/channels/${msg.guild.id}/${msg.channel.id}/${msg.id}`;
                             foundUrls.forEach(url => {
-                                urls.push({
-                                    url,
-                                    timestamp: msg.createdTimestamp,
-                                    userId: msg.author.id,
-                                    author: msg.author.tag,
-                                    threadName: thread.name,
-                                    messageId: msg.id,
-                                    messageUrl: messageUrl,
-                                    channelId: msg.channel.id
-                                });
-                            });
-                        }
+    urls.push({
+        url,
+        timestamp: msg.createdTimestamp,
+        userId: msg.author.id,
+        author: msg.author.tag,
+        threadId: msg.channel.id,            // The thread ID (previously called channelId)
+        forumChannelId: msg.channel.parent?.id || null,  // The parent forum channel ID
+        messageId: msg.id,
+        messageUrl: messageUrl
+    });
+});
+						}
                     });
                 }
-            } else {
-                const messages = await targetChannel.messages.fetch({ limit: 100 });
-                messages.forEach(msg => {
-                    const foundUrls = msg.content.match(urlTracker.urlRegex);
-                    if (foundUrls) {
-                        const messageUrl = `https://discord.com/channels/${msg.guild.id}/${msg.channel.id}/${msg.id}`;
-                        foundUrls.forEach(url => {
-                            urls.push({
-                                url,
-                                timestamp: msg.createdTimestamp,
-                                userId: msg.author.id,
-                                author: msg.author.tag,
-                                messageId: msg.id,
-                                messageUrl: messageUrl,
-                                channelId: msg.channel.id
-                            });
-                        });
-                    }
+			}
+            else {
+    const messages = await targetChannel.messages.fetch({ limit: 100 });
+    messages.forEach(msg => {
+        const foundUrls = msg.content.match(urlTracker.urlRegex);
+        if (foundUrls) {
+            const messageUrl = `https://discord.com/channels/${msg.guild.id}/${msg.channel.id}/${msg.id}`;
+            foundUrls.forEach(url => {
+                urls.push({
+                    url,
+                    timestamp: msg.createdTimestamp,
+                    userId: msg.author.id,
+                    author: msg.author.tag,
+                    messageId: msg.id,
+                    messageUrl: messageUrl,
+                    channelId: msg.channel.id,               // Keep for backwards compatibility 
+                    threadId: msg.channel.isThread() ? msg.channel.id : null,
+                    forumChannelId: msg.channel.isThread() ? msg.channel.parent?.id : null
                 });
-            }
+            });
+        }
+    });
+}
 
             // Sort by timestamp (removed duplicate filtering)
-            urls = urls.sort((a, b) => b.timestamp - a.timestamp);
+            urls = urls.sort((a, b) => a.timestamp - b.timestamp);
 
             // Save updated URLs with retries
             let saved = false;

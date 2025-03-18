@@ -77,7 +77,7 @@ if (message.deletable) {
                 const existingUrl = await this.urlStore.findUrlHistory(url);
                 
                 if (existingUrl) {
-                    logWithTimestamp(`Found existing URL: ${url} from author: ${existingUrl.author}`, 'INFO');
+                    logWithTimestamp(`Found existing URL: ${url} from author: ${existingUrl.author}`, 'INFO'); 
                     
                     // Check if the original poster is the same as current author
                     if (existingUrl.author !== message.author.tag) {
@@ -156,12 +156,14 @@ logWithTimestamp(`Sent duplicate URL notification for: ${url}`, 'INFO');
                                     urlsToStore.push({
                                         url,
                                         timestamp: message.createdTimestamp,
-                                        author: message.author.tag,
-                                        authorId: message.author.id,
-                                        threadName: message.channel.name,
-                                        threadId: message.channel.id,
-                                        messageId: message.id,
-                                        guildId: message.guild.id
+										author: message.author.tag,
+										authorId: message.author.id,
+										threadName: message.channel.name,
+										threadId: message.channel.id,                      // Explicit thread ID
+										forumChannelId: message.channel.parent?.id,        // Parent forum channel ID
+										messageId: message.id,
+										messageUrl: `https://discord.com/channels/${message.guild.id}/${message.channel.id}/${message.id}`,
+										guildId: message.guild.id
                                     });
                                 } else {
                                     // More than threshold - send warning as duplicate
