@@ -87,7 +87,7 @@ if (message.deletable) {
     .setTitle('Please share only your own original content!')
     .setDescription(`${message.author}, this URL was previously shared by another user`)
     .addFields(
-    { name: 'Original message:', value: `https://discord.com/channels/${message.guild.id}/${existingUrl.channelId}/${existingUrl.messageId}` },
+	{name: 'Original message:', value: `https://discord.com/channels/${message.guild.id}/${existingUrl.threadId}/${existingUrl.messageId}` },
         { name: 'URL', value: url }
     )
     .setFooter({
@@ -155,7 +155,7 @@ logWithTimestamp(`Sent duplicate URL notification for: ${url}`, 'INFO');
                                     logWithTimestamp(`Deleted old URL entry as original message no longer exists and age (${ageInMinutes.toFixed(2)} min) is less than threshold: ${url}`, 'INFO');
                                     urlsToStore.push({
                                         url,
-                                        timestamp: message.createdTimestamp,
+										timestamp: message.createdTimestamp,
 										author: message.author.tag,
 										authorId: message.author.id,
 										threadName: message.channel.name,
@@ -164,7 +164,7 @@ logWithTimestamp(`Sent duplicate URL notification for: ${url}`, 'INFO');
 										messageId: message.id,
 										messageUrl: `https://discord.com/channels/${message.guild.id}/${message.channel.id}/${message.id}`,
 										guildId: message.guild.id
-                                    });
+									});
                                 } else {
                                     // More than threshold - send warning as duplicate
                                     const embed = new EmbedBuilder()
