@@ -67,7 +67,7 @@ class UrlStorage {
     return null;
 }
 
-    async saveUrls(channelId, newUrls) {
+async saveUrls(channelId, newUrls) {
     if (!this.isInitialized) {
         logWithTimestamp('URL storage not initialized', 'ERROR');
         return 0;
@@ -79,19 +79,30 @@ class UrlStorage {
         let addedCount = 0;
 
         for (const newUrl of newUrls) {
-            updatedUrls.push({
-                ...newUrl,
-                url: newUrl.url.trim(),
-                messageUrl: newUrl.messageUrl,
-                userId: newUrl.userId,
-                messageId: newUrl.messageId
-            });
-            logWithTimestamp(`Added URL: ${newUrl.url}`, 'INFO');
-            addedCount++;
+            // Check if URL with the same messageId already exists
+            const isDuplicate = updatedUrls.some(existing => 
+                existing.messageId === newUrl.messageId && 
+                existing.url.trim() === newUrl.url.trim()
+            );
+            
+            // Only add if not a duplicate
+            if (!isDuplicate) {
+                updatedUrls.push({
+                    ...newUrl,
+                    url: newUrl.url.trim(),
+                    messageUrl: newUrl.messageUrl,
+                    userId: newUrl.userId,
+                    messageId: newUrl.messageId
+                });
+                logWithTimestamp(`Added URL: ${newUrl.url}`, 'INFO');
+                addedCount++;
+            } else {
+                logWithTimestamp(`Skipped duplicate message URL: ${newUrl.url} (messageId: ${newUrl.messageId})`, 'INFO');
+            }
         }
 
         if (addedCount > 0) {
-            // Change this line to sort by ascending timestamp (oldest first)
+            // Sort by ascending timestamp (oldest first)
             updatedUrls.sort((a, b) => a.timestamp - b.timestamp);
             this.urls.set(channelId, updatedUrls);
             

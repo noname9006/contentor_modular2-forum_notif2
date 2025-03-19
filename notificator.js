@@ -277,7 +277,7 @@ async function handleWrongThread(message, correctThreadId) {
 
 async function handleFetchLinksCommand(message) {
     try {
-        // Check if the user has permission to use commands
+        // Permission check code remains the same
         if (!hasCommandPermission(message.member)) {
             const embed = new EmbedBuilder()
                 .setColor(ERROR_COLOR)
@@ -292,6 +292,7 @@ async function handleFetchLinksCommand(message) {
             return;
         }
 
+        // Command format check remains the same
         const args = message.content.split(' ');
         if (args.length !== 3) {
             await message.reply('Usage: !fetch links <channel_id>');
@@ -308,72 +309,94 @@ async function handleFetchLinksCommand(message) {
 
         logWithTimestamp(`Fetching URLs from channel ${channelId}`, 'INFO');
         
-        let urls = [];
-        try {
-            // First get stored URLs
-            const storedUrls = await urlStore.getUrls(channelId);
-            urls = [...storedUrls];
-
-            // Then fetch new URLs
-            if (targetChannel.type === ChannelType.GuildForum) {
-                const threads = await targetChannel.threads.fetch();
-                
-                for (const [threadId, thread] of threads.threads) {
-                    const messages = await thread.messages.fetch({ limit: 100 });
-                    messages.forEach(msg => {
-                        const foundUrls = msg.content.match(urlTracker.urlRegex);
-                        if (foundUrls) {
-                            const messageUrl = `https://discord.com/channels/${msg.guild.id}/${msg.channel.id}/${msg.id}`;
-                            foundUrls.forEach(url => {
-                                urls.push({
+        // Get stored URLs
+        const storedUrls = await urlStore.getUrls(channelId);
+        const storedUrlMap = new Map(); // Create a map for quick duplicate checking
+        
+        // Create a map of existing URLs for efficient lookup
+        storedUrls.forEach(url => {
+            const key = `${url.messageId}_${url.url.trim()}`;
+            storedUrlMap.set(key, url);
+        });
+        
+        // Array to hold newly discovered URLs
+        let newUrls = [];
+        let fetchedUrls = 0;
+        
+        // Then fetch new URLs
+        if (targetChannel.type === ChannelType.GuildForum) {
+            const threads = await targetChannel.threads.fetch();
+            
+            for (const [threadId, thread] of threads.threads) {
+                const messages = await thread.messages.fetch({ limit: 100 });
+                messages.forEach(msg => {
+                    const foundUrls = msg.content.match(urlTracker.urlRegex);
+                    if (foundUrls) {
+                        fetchedUrls += foundUrls.length;
+                        const messageUrl = `https://discord.com/channels/${msg.guild.id}/${msg.channel.id}/${msg.id}`;
+                        foundUrls.forEach(url => {
+                            const key = `${msg.id}_${url.trim()}`;
+                            
+                            // Only add if not already in the store
+                            if (!storedUrlMap.has(key)) {
+                                newUrls.push({
                                     url,
                                     timestamp: msg.createdTimestamp,
                                     userId: msg.author.id,
                                     author: msg.author.tag,
-                                    threadId: msg.channel.id,            // The thread ID (previously called channelId)
-                                    forumChannelId: msg.channel.parent?.id || null,  // The parent forum channel ID
+                                    threadId: msg.channel.id,
+                                    forumChannelId: msg.channel.parent?.id || null,
                                     messageId: msg.id,
                                     messageUrl: messageUrl
                                 });
-                            });
-                        }
-                    });
-                }
+                            }
+                        });
+                    }
+                });
             }
-            else {
-                const messages = await targetChannel.messages.fetch({ limit: 100 });
-                messages.forEach(msg => {
-                    const foundUrls = msg.content.match(urlTracker.urlRegex);
-                    if (foundUrls) {
-                        const messageUrl = `https://discord.com/channels/${msg.guild.id}/${msg.channel.id}/${msg.id}`;
-                        foundUrls.forEach(url => {
-                            urls.push({
+        } else {
+            // Regular channel processing remains similar, just add duplicate checking
+            const messages = await targetChannel.messages.fetch({ limit: 100 });
+            messages.forEach(msg => {
+                const foundUrls = msg.content.match(urlTracker.urlRegex);
+                if (foundUrls) {
+                    fetchedUrls += foundUrls.length;
+                    const messageUrl = `https://discord.com/channels/${msg.guild.id}/${msg.channel.id}/${msg.id}`;
+                    foundUrls.forEach(url => {
+                        const key = `${msg.id}_${url.trim()}`;
+                        
+                        // Only add if not already in the store
+                        if (!storedUrlMap.has(key)) {
+                            newUrls.push({
                                 url,
                                 timestamp: msg.createdTimestamp,
                                 userId: msg.author.id,
                                 author: msg.author.tag,
                                 messageId: msg.id,
                                 messageUrl: messageUrl,
-                                channelId: msg.channel.id,               // Keep for backwards compatibility 
+                                channelId: msg.channel.id,
                                 threadId: msg.channel.isThread() ? msg.channel.id : null,
                                 forumChannelId: msg.channel.isThread() ? msg.channel.parent?.id : null
                             });
-                        });
-                    }
-                });
-            }
+                        }
+                    });
+                }
+            });
+        }
 
-            // Sort by timestamp (removed duplicate filtering)
-            urls = urls.sort((a, b) => a.timestamp - b.timestamp);
+        // Sort by timestamp
+        newUrls = newUrls.sort((a, b) => a.timestamp - b.timestamp);
 
-            // Save updated URLs with retries
-            let saved = false;
-            let retries = 3;
+        // Save only new URLs with retries
+        let saved = false;
+        let retries = 3;
+        
+        if (newUrls.length > 0) {
             while (!saved && retries > 0) {
                 try {
-                    await urlStore.saveUrls(channelId, urls);
+                    await urlStore.saveUrls(channelId, newUrls);
                     saved = true;
-                    logWithTimestamp(`Successfully saved ${urls.length} URLs for channel ${channelId}`, 'INFO');
+                    logWithTimestamp(`Successfully saved ${newUrls.length} new URLs for channel ${channelId}`, 'INFO');
                 } catch (error) {
                     retries--;
                     if (retries === 0) {
@@ -382,34 +405,46 @@ async function handleFetchLinksCommand(message) {
                     await new Promise(resolve => setTimeout(resolve, 1000));
                 }
             }
-
-            if (urls.length === 0) {
-                await message.reply('No URLs found in this channel.');
-                return;
-            }
-
-            const embed = new EmbedBuilder()
-                .setColor('#0099ff')
-                .setTitle('URLs fetched')
-                .setDescription(`Found and saved ${urls.length} URLs in channel: ${channelId}`)
-                .addFields(
-                    { 
-                        name: 'Storage Status', 
-                        value: saved ? '✅ URLs saved successfully' : '❌ Failed to save URLs'
-                    }
-                )
-                .setFooter({
-                    text: 'Botanix Labs',
-                    iconURL: 'https://a-us.storyblok.com/f/1014909/512x512/026e26392f/dark_512-1.png'
-                })
-                .setTimestamp();
-
-            await message.reply({ embeds: [embed] });
-            logWithTimestamp(`Fetched and saved ${urls.length} URLs from channel ${channelId}`, 'INFO');
-        } catch (error) {
-            logWithTimestamp(`Error fetching URLs: ${error.message}`, 'ERROR');
-            await message.reply('An error occurred while fetching URLs.');
+        } else {
+            saved = true; // No new URLs to save, but operation was successful
         }
+
+        if (fetchedUrls === 0) {
+            await message.reply('No URLs found in this channel.');
+            return;
+        }
+
+        // Get channel name for better display
+        let channelDisplay;
+        try {
+            // Format as a channel mention that will be clickable in Discord
+            channelDisplay = `<#${channelId}>`;
+        } catch (error) {
+            // Fallback to just ID if we can't get proper format
+            channelDisplay = channelId;
+        }
+
+        const embed = new EmbedBuilder()
+            .setColor('#0099ff')
+            .setTitle('URLs fetched')
+            .setDescription(`Analysis for channel: ${channelDisplay}`)
+            .addFields(
+                { name: 'URLs in Database', value: `${storedUrls.length}`, inline: true },
+                { name: 'URLs Found', value: `${fetchedUrls}`, inline: true },
+                { name: 'New URLs Added', value: `${newUrls.length}`, inline: true },
+                { 
+                    name: 'Storage Status', 
+                    value: saved ? '✅ URLs saved successfully' : '❌ Failed to save URLs'
+                }
+            )
+            .setFooter({
+                text: 'Botanix Labs',
+                iconURL: 'https://a-us.storyblok.com/f/1014909/512x512/026e26392f/dark_512-1.png'
+            })
+            .setTimestamp();
+
+        await message.reply({ embeds: [embed] });
+        logWithTimestamp(`Fetch command complete - Found: ${fetchedUrls}, Added: ${newUrls.length}, Total in DB: ${storedUrls.length + newUrls.length}`, 'INFO');
     } catch (error) {
         logWithTimestamp(`Error handling fetch links command: ${error.message}`, 'ERROR');
         await message.reply('An error occurred while processing the command.').catch(() => {});
