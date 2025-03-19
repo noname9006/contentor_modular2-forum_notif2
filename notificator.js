@@ -1,9 +1,9 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits, EmbedBuilder, Partials, ChannelType } = require('discord.js');
-const UrlStorage = require('./urlStore');
+const UrlStorage = require('./urlStore');  // Changed to UrlStorage
 const UrlTracker = require('./urlTracker');
 const { logWithTimestamp } = require('./utils');
-const { DB_TIMEOUT } = require('./config');
+const { DB_TIMEOUT, RATE_LIMIT_MAX_REQUESTS, RATE_LIMIT_COOLDOWN } = require('./config');
 
 const client = new Client({
     intents: [
@@ -16,7 +16,7 @@ const client = new Client({
 });
 
 // Constants
-const MAX_TEXT_LENGTH = 300;
+const MAX_TEXT_LENGTH = 200;
 const ERROR_COLOR = '#f2b518';
 const AUTO_DELETE_TIMER_SECONDS = parseInt(process.env.AUTO_DELETE_TIMER) || 30;
 const AUTO_DELETE_TIMER = AUTO_DELETE_TIMER_SECONDS * 1000;
@@ -30,6 +30,25 @@ const URL_HISTORY_LIMIT = 10;
 const rateLimitMap = new Map();
 const threadNameCache = new Map(); // Stores {threadId: {name: string, timestamp: number, pendingOps: number}}
 
+function checkRateLimit(userId) {
+    const now = Date.now();
+    const userRateLimit = rateLimitMap.get(userId) || { timestamp: now, count: 0 };
+    
+    if (now - userRateLimit.timestamp > RATE_LIMIT_COOLDOWN) {
+        userRateLimit.timestamp = now;
+        userRateLimit.count = 1;
+    } else {
+        userRateLimit.count++;
+        if (userRateLimit.count > RATE_LIMIT_MAX_REQUESTS) {
+            logWithTimestamp(`Rate limit hit for user ID: ${userId}`, 'RATELIMIT');
+            return true;
+        }
+    }
+    
+    rateLimitMap.set(userId, userRateLimit);
+    return false;
+}
+
 function findHighestRole(memberRoles) {
     for (let i = 5; i >= 0; i--) {
         const roleId = process.env[`ROLE_${i}_ID`];
@@ -40,7 +59,7 @@ function findHighestRole(memberRoles) {
     return -1;
 }
 
-function validateEnvironmentVariables() {
+async function validateEnvironmentVariables() {
     const requiredVariables = [
         'DISCORD_TOKEN',
         'MAIN_CHANNEL_ID',
@@ -79,6 +98,16 @@ function validateEnvironmentVariables() {
         logWithTimestamp('Invalid DB_TIMEOUT value. Must be a positive number.', 'ERROR');
         process.exit(1);
     }
+    
+    // Add logging for command permission configuration
+    logWithTimestamp('Command access restricted to server administrators only', 'CONFIG');
+    logWithTimestamp(`Last updated: 2025-03-19 09:20:14 UTC by noname9006`, 'INFO');
+}
+
+
+function hasCommandPermission(member) {
+    // Only allow users with Administrator permission
+    return member.permissions.has('Administrator');
 }
 
 function checkBotPermissions(guild, channel) {
@@ -248,6 +277,21 @@ async function handleWrongThread(message, correctThreadId) {
 
 async function handleFetchLinksCommand(message) {
     try {
+        // Check if the user has permission to use commands
+        if (!hasCommandPermission(message.member)) {
+            const embed = new EmbedBuilder()
+                .setColor(ERROR_COLOR)
+                .setDescription(`${message.author}, you don't have permission to use this command. Only server administrators can use it.`)
+                .setFooter({
+                    text: 'Botanix Labs',
+                    iconURL: 'https://a-us.storyblok.com/f/1014909/512x512/026e26392f/dark_512-1.png'
+                })
+            
+            await message.reply({ embeds: [embed] });
+            logWithTimestamp(`Command access denied for user ${message.author.tag} (${message.author.id}) - Administrator permission required`, 'WARN');
+            return;
+        }
+
         const args = message.content.split(' ');
         if (args.length !== 3) {
             await message.reply('Usage: !fetch links <channel_id>');
@@ -281,43 +325,43 @@ async function handleFetchLinksCommand(message) {
                         if (foundUrls) {
                             const messageUrl = `https://discord.com/channels/${msg.guild.id}/${msg.channel.id}/${msg.id}`;
                             foundUrls.forEach(url => {
-    urls.push({
-        url,
-        timestamp: msg.createdTimestamp,
-        userId: msg.author.id,
-        author: msg.author.tag,
-        threadId: msg.channel.id,            // The thread ID (previously called channelId)
-        forumChannelId: msg.channel.parent?.id || null,  // The parent forum channel ID
-        messageId: msg.id,
-        messageUrl: messageUrl
-    });
-});
-						}
+                                urls.push({
+                                    url,
+                                    timestamp: msg.createdTimestamp,
+                                    userId: msg.author.id,
+                                    author: msg.author.tag,
+                                    threadId: msg.channel.id,            // The thread ID (previously called channelId)
+                                    forumChannelId: msg.channel.parent?.id || null,  // The parent forum channel ID
+                                    messageId: msg.id,
+                                    messageUrl: messageUrl
+                                });
+                            });
+                        }
                     });
                 }
-			}
+            }
             else {
-    const messages = await targetChannel.messages.fetch({ limit: 100 });
-    messages.forEach(msg => {
-        const foundUrls = msg.content.match(urlTracker.urlRegex);
-        if (foundUrls) {
-            const messageUrl = `https://discord.com/channels/${msg.guild.id}/${msg.channel.id}/${msg.id}`;
-            foundUrls.forEach(url => {
-                urls.push({
-                    url,
-                    timestamp: msg.createdTimestamp,
-                    userId: msg.author.id,
-                    author: msg.author.tag,
-                    messageId: msg.id,
-                    messageUrl: messageUrl,
-                    channelId: msg.channel.id,               // Keep for backwards compatibility 
-                    threadId: msg.channel.isThread() ? msg.channel.id : null,
-                    forumChannelId: msg.channel.isThread() ? msg.channel.parent?.id : null
+                const messages = await targetChannel.messages.fetch({ limit: 100 });
+                messages.forEach(msg => {
+                    const foundUrls = msg.content.match(urlTracker.urlRegex);
+                    if (foundUrls) {
+                        const messageUrl = `https://discord.com/channels/${msg.guild.id}/${msg.channel.id}/${msg.id}`;
+                        foundUrls.forEach(url => {
+                            urls.push({
+                                url,
+                                timestamp: msg.createdTimestamp,
+                                userId: msg.author.id,
+                                author: msg.author.tag,
+                                messageId: msg.id,
+                                messageUrl: messageUrl,
+                                channelId: msg.channel.id,               // Keep for backwards compatibility 
+                                threadId: msg.channel.isThread() ? msg.channel.id : null,
+                                forumChannelId: msg.channel.isThread() ? msg.channel.parent?.id : null
+                            });
+                        });
+                    }
                 });
-            });
-        }
-    });
-}
+            }
 
             // Sort by timestamp (removed duplicate filtering)
             urls = urls.sort((a, b) => a.timestamp - b.timestamp);
@@ -375,7 +419,13 @@ async function handleFetchLinksCommand(message) {
 // Cache cleanup
 setInterval(() => {
     const now = Date.now();
-        // Clean up thread name cache
+    // Clean up rate limit map
+    for (const [userId, timestamp] of rateLimitMap.entries()) {
+        if (now - timestamp > RATE_LIMIT_COOLDOWN * 2) {
+            rateLimitMap.delete(userId);
+        }
+    }
+    // Clean up thread name cache
     for (const [threadId, data] of threadNameCache.entries()) {
                 if (now - data.timestamp > THREAD_CACHE_TTL && data.pendingOps === 0) {
             threadNameCache.delete(threadId);

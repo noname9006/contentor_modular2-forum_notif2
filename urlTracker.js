@@ -11,33 +11,43 @@ class UrlTracker {
     }
 
     async syncWithStorage(channelId) {
-        try {
-            const urls = await this.fetchAllUrlsFromChannel(channelId);
-            if (urls.length > 0) {
-                await this.urlStore.saveUrls(channelId, urls);
-                logWithTimestamp(`Synced ${urls.length} URLs for channel ${channelId}`, 'INFO');
-            }
-        } catch (error) {
-            logWithTimestamp(`Error syncing channel ${channelId}: ${error.message}`, 'ERROR');
+    try {
+        // Skip fetching URLs during initialization
+        // Only sync when explicitly requested after startup
+        if (this.initializing) {
+            logWithTimestamp(`Skipping URL sync for channel ${channelId} during initialization`, 'INFO');
+            return;
         }
+        
+        const urls = await this.fetchAllUrlsFromChannel(channelId);
+        if (urls.length > 0) {
+            await this.urlStore.saveUrls(channelId, urls);
+            logWithTimestamp(`Synced ${urls.length} URLs for channel ${channelId}`, 'INFO');
+        }
+    } catch (error) {
+        logWithTimestamp(`Error syncing channel ${channelId}: ${error.message}`, 'ERROR');
     }
+}
 
-    async init() {
-        try {
-            // No need to initialize urlStore here as it's now passed in from outside
-            
-            // Sync with all channels in storage
-            const channelIds = await this.urlStore.getAllChannelIds();
-            for (const channelId of channelIds) {
-                await this.syncWithStorage(channelId);
-            }
-            
-            logWithTimestamp('URL Tracker initialized successfully', 'INFO');
-        } catch (error) {
-            logWithTimestamp(`Failed to initialize URL Tracker: ${error.message}`, 'ERROR');
-            throw error;
-        }
+async init() {
+    try {
+        // Add a flag to track initialization state
+        this.initializing = true;
+        
+        // Get channel IDs but don't sync during initialization
+        const channelIds = await this.urlStore.getAllChannelIds();
+        logWithTimestamp(`Found ${channelIds.length} channels in storage. Skipping sync during initialization.`, 'INFO');
+        
+        // Turn off initialization flag when complete
+        this.initializing = false;
+        
+        logWithTimestamp('URL Tracker initialized successfully', 'INFO');
+    } catch (error) {
+        this.initializing = false;
+        logWithTimestamp(`Failed to initialize URL Tracker: ${error.message}`, 'ERROR');
+        throw error;
     }
+}
 
     async handleUrlMessage(message, urls) {
         try {
