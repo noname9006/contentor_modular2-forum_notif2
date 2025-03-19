@@ -138,10 +138,10 @@ logWithTimestamp(`Sent duplicate URL notification for: ${url}`, 'INFO');
                                 // Original message still exists
                                 const embed = new EmbedBuilder()
                                     .setColor('#ff0000')
-                                    .setTitle(`${message.author}, You have posted this before`)
-                                    .setDescription(`You already shared this URL in this thread on <t:${Math.floor(new Date(existingUrl.timestamp).getTime() / 1000)}:R>`)
+                                    .setTitle(`You have posted this before`)
+                                    .setDescription(`${message.author}, you already shared this URL in a different thread`)
                                     .addFields(
-                                        { name: 'Original Message', value: `[Click to view](${originalMessage.url})` },
+                                        { name: 'Original Message:', value: `https://discord.com/channels/${message.guild.id}/${existingUrl.threadId}/${existingUrl.messageId}` },
                                         { name: 'URL', value: url }
                                     )
                                     .setFooter({
@@ -150,6 +150,7 @@ logWithTimestamp(`Sent duplicate URL notification for: ${url}`, 'INFO');
                                     })
 
                                 await message.reply({ embeds: [embed] });
+								await message.react('⭕');
                                 logWithTimestamp(`Sent same-thread notification for: ${url}`, 'INFO');
                             } else {
                                 // Original message is gone - check age threshold
@@ -177,12 +178,10 @@ logWithTimestamp(`Sent duplicate URL notification for: ${url}`, 'INFO');
                                     // More than threshold - send warning as duplicate
                                     const embed = new EmbedBuilder()
                                         .setColor('#ff0000')
-                                        .setTitle(`${message.author}, You have posted this before`)
-                                        .setDescription(`You already shared this URL in this thread on <t:${Math.floor(new Date(existingUrl.timestamp).getTime() / 1000)}:R>`)
+                                        .setTitle(`You have posted this before`)
+                                        .setDescription(`${message.author}, you already shared this URL in this thread`)
                                         .addFields(
-                                            { name: 'Original Message', value: `Original message was deleted` },
-                                            { name: 'URL', value: url },
-                                            { name: 'Age', value: `${ageInMinutes.toFixed(2)} minutes` }
+                                            { name: 'Original Message:', value: `deleted` },
                                         )
                                         .setFooter({
                                             text: 'Botanix Labs',
@@ -190,6 +189,7 @@ logWithTimestamp(`Sent duplicate URL notification for: ${url}`, 'INFO');
                                         })
 
                                     await message.reply({ embeds: [embed] });
+									await message.react('⭕');
                                     logWithTimestamp(`Sent same-thread notification for deleted message with age (${ageInMinutes.toFixed(2)} min) exceeding threshold: ${url}`, 'INFO');
                                 }
                             }
