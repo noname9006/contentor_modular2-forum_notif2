@@ -155,11 +155,11 @@ class UrlTracker {
                             'Different User Posted Same URL',
                             [
                                 { name: 'Sender', value: `<@${message.author.id}> (${message.author.id})` },
-                                { name: 'Message', value: `https://discord.com/channels/${message.guild.id}/${message.channel.id}/${message.id}` },
-                                { name: 'Original Message', value: `https://discord.com/channels/${message.guild.id}/${existingUrl.threadId}/${existingUrl.messageId}` },
+                                { name: 'Message', value: `https://discord.com/channels/${message.guild.id}/${message.channel.id}/${message.id}`, inline: true},
+                                { name: 'Original Message', value: `https://discord.com/channels/${message.guild.id}/${existingUrl.threadId}/${existingUrl.messageId}`, inline: false},
                                 { name: 'Original Poster', value: existingUrl.userId ? `<@${existingUrl.userId}> (${existingUrl.userId})` : existingUrl.author || 'Unknown' },
                                 { name: 'URL', value: url },
-								{ name: 'Warning', value: 'Sent to user' }
+								{ name: 'Warning', value: 'Sent to user', inline: false }
                             ]
                         );
                         
