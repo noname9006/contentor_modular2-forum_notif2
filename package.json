@@ -1,0 +1,21 @@
+{
+  "name": "contentor_modular2-forum_notif2",
+  "version": "1.0.0",
+  "description": "Discord bot for forum notification and URL tracking",
+  "main": "contentoor.js",
+  "scripts": {
+    "start": "node contentoor.js"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "forum",
+    "notifications"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "discord.js": "^14.0.0",
+    "dotenv": "^16.0.0"
+  }
+}
