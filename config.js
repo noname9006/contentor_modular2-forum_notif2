@@ -20,6 +20,10 @@ const THREAD_INACTIVITY_DAYS = parseInt(process.env.THREAD_INACTIVITY_DAYS) || 3
 // Cron schedule for thread cleanup (default: every 6 hours)
 const THREAD_CLEANUP_SCHEDULE = process.env.THREAD_CLEANUP_SCHEDULE || '0 */6 * * *';
 
+// Threshold-based cleanup: remove N least-active users when thread reaches this member count
+const THREAD_USERS_THRESHOLD = parseInt(process.env.THREAD_USERS_THRESHOLD) || 0; // 0 = disabled
+const THREAD_USERS_THRESHOLD_REMOVE = parseInt(process.env.THREAD_USERS_THRESHOLD_REMOVE) || 1;
+
 module.exports = {
     DB_TIMEOUT,
     RATE_LIMIT_MAX_REQUESTS,
@@ -27,5 +31,7 @@ module.exports = {
     THRESHOLD_DUPE_AGE,
     ROLE_TO_THREAD_ENABLED,
     THREAD_INACTIVITY_DAYS,
-    THREAD_CLEANUP_SCHEDULE
+    THREAD_CLEANUP_SCHEDULE,
+    THREAD_USERS_THRESHOLD,
+    THREAD_USERS_THRESHOLD_REMOVE
 };

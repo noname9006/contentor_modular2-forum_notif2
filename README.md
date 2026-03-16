@@ -41,7 +41,7 @@ Contentor is a Node.js Discord bot built for community forum management. It watc
 - **Admin fetch command** — Bulk-imports existing URLs from any channel into the database
 - **Violation logging** — Sends detailed log embeds (with evidence links) to a dedicated log channel
 - **Rate limiting** — Per-user request throttling to prevent abuse
-- **Thread cleanup** — Scheduled removal of inactive or mismatched users from configured threads
+- **Thread cleanup** — Scheduled removal of inactive or mismatched users from configured threads; optionally removes the least-active users when a thread exceeds a configured member count
 - **Activity tracking** — Records last-post timestamp per user per thread, persisted to disk
 - **Graceful shutdown** — Saves state and cleans up on SIGINT/SIGTERM
 
@@ -130,6 +130,11 @@ THREAD_INACTIVITY_DAYS=30
 # Comma-separated role IDs exempt from cleanup removal (separate from IGNORED_ROLES)
 IGNORED_ROLES_CLEANUP=111111111111111111,222222222222222222
 
+# Remove N least-active users when thread member count reaches this number (0 or unset = disabled)
+THREAD_USERS_THRESHOLD=100
+# Number of least-active users to remove when threshold is triggered (default: 1)
+THREAD_USERS_THRESHOLD_REMOVE=5
+
 # ── Optional ─────────────────────────────────────────────────────────────────
 
 # Comma-separated role IDs whose holders are exempt from all checks
@@ -172,6 +177,8 @@ THRESHOLD_DUPE_AGE=60
 | `THREAD_CLEANUP_SCHEDULE` | | `0 */6 * * *` | Cron expression for scheduled cleanup |
 | `THREAD_INACTIVITY_DAYS` | | `30` | Days of inactivity before removal (time-based mode only) |
 | `IGNORED_ROLES_CLEANUP` | | — | Comma-separated role IDs never removed by cleanup |
+| `THREAD_USERS_THRESHOLD` | | _(disabled)_ | Member count that triggers least-active removal; 0 or unset = disabled |
+| `THREAD_USERS_THRESHOLD_REMOVE` | | `1` | Number of least-active members to remove when threshold is reached |
 
 ---
 
