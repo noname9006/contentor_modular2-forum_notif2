@@ -1,6 +1,6 @@
 const cron = require('node-cron');
 const { logWithTimestamp } = require('./utils');
-const { ROLE_TO_THREAD_ENABLED, THREAD_INACTIVITY_DAYS } = require('./config');
+const { ROLE_TO_THREAD_ENABLED, THREAD_INACTIVITY_DAYS, THREAD_USERS_THRESHOLD, THREAD_USERS_THRESHOLD_REMOVE } = require('./config');
 
 const MAX_HISTORY_MESSAGES = 10000;
 const HISTORY_FETCH_BATCH = 100;
@@ -209,6 +209,51 @@ class ThreadCleaner {
         return removedFromThread;
     }
 
+    async applyThresholdCleanup(thread) {
+        const threadId = thread.id;
+        const threadMembers = await thread.members.fetch();
+
+        // Exclude the bot itself
+        const eligibleMembers = [...threadMembers.values()].filter(m => m.id !== this.client.user.id);
+
+        if (eligibleMembers.length < THREAD_USERS_THRESHOLD) {
+            logWithTimestamp(`Thread ${thread.name}: member count ${eligibleMembers.length} below threshold ${THREAD_USERS_THRESHOLD}, skipping`, 'INFO');
+            return 0;
+        }
+
+        // Build list with last activity timestamps, filtering out ignored roles
+        const membersWithActivity = [];
+        for (const member of eligibleMembers) {
+            const guildMember = await thread.guild.members.fetch(member.id).catch(() => null);
+
+            // Skip members with cleanup-exempt roles (if we can fetch them)
+            if (guildMember && guildMember.roles.cache.some(role => ignoredRolesCleanup.has(role.id))) {
+                continue;
+            }
+
+            const lastActivity = this.activityStore.getLastActivity(threadId, member.id) ?? 0;
+            membersWithActivity.push({ id: member.id, lastActivity });
+        }
+
+        // Sort ascending: least recently active first (0 = never active, sorts first)
+        membersWithActivity.sort((a, b) => a.lastActivity - b.lastActivity);
+
+        const toRemove = membersWithActivity.slice(0, THREAD_USERS_THRESHOLD_REMOVE);
+        let removedCount = 0;
+
+        for (const { id } of toRemove) {
+            try {
+                await thread.members.remove(id);
+                removedCount++;
+                logWithTimestamp(`Removed member ${id} from thread ${thread.name}: threshold exceeded (least active)`, 'INFO');
+            } catch (err) {
+                logWithTimestamp(`Error removing member ${id} from thread ${thread.name} during threshold cleanup: ${err.message}`, 'ERROR');
+            }
+        }
+
+        return removedCount;
+    }
+
     async performCleanup() {
         if (this.isRunning) {
             logWithTimestamp('Thread cleanup is already in progress, skipping', 'WARN');
@@ -268,6 +313,12 @@ class ThreadCleaner {
 
                     const removed = await this.cleanThread(thread, ROLE_TO_THREAD_ENABLED);
                     totalRemoved += removed;
+
+                    if (THREAD_USERS_THRESHOLD > 0) {
+                        const thresholdRemoved = await this.applyThresholdCleanup(thread);
+                        totalRemoved += thresholdRemoved;
+                    }
+
                     totalChecked++;
                 } catch (threadError) {
                     logWithTimestamp(`Error processing thread ${threadId}: ${threadError.message}`, 'ERROR');
@@ -317,8 +368,13 @@ class ThreadCleaner {
 
             const removed = await this.cleanThread(thread, ROLE_TO_THREAD_ENABLED);
 
+            let totalRemoved = removed;
+            if (THREAD_USERS_THRESHOLD > 0) {
+                totalRemoved += await this.applyThresholdCleanup(thread);
+            }
+
             const duration = (Date.now() - startTime) / 1000;
-            logWithTimestamp(`Thread cleanup completed in ${duration.toFixed(2)}s: Removed ${removed} members from ${thread.name}`, 'INFO');
+            logWithTimestamp(`Thread cleanup completed in ${duration.toFixed(2)}s: Removed ${totalRemoved} members from ${thread.name}`, 'INFO');
         } catch (error) {
             logWithTimestamp(`Thread cleanup failed: ${error.message}`, 'ERROR');
         } finally {
