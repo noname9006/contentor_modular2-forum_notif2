@@ -2,8 +2,10 @@ require('dotenv').config();
 const { Client, GatewayIntentBits, EmbedBuilder, Partials, ChannelType } = require('discord.js');
 const UrlStorage = require('./urlStore');  // Changed to UrlStorage
 const UrlTracker = require('./urlTracker');
+const ActivityStore = require('./activityStore');
+const ThreadCleaner = require('./scheduler');
 const { logWithTimestamp } = require('./utils');
-const { DB_TIMEOUT, RATE_LIMIT_MAX_REQUESTS, RATE_LIMIT_COOLDOWN } = require('./config');
+const { DB_TIMEOUT, RATE_LIMIT_MAX_REQUESTS, RATE_LIMIT_COOLDOWN, ROLE_TO_THREAD_ENABLED, THREAD_CLEANUP_SCHEDULE } = require('./config');
 
 const client = new Client({
     intents: [
@@ -65,8 +67,10 @@ async function validateEnvironmentVariables() {
         'MAIN_CHANNEL_ID',
         'AUTO_DELETE_TIMER',
         'DB_TIMEOUT',
-        ...Array.from({length: 6}, (_, i) => `ROLE_${i}_ID`),
-        ...Array.from({length: 6}, (_, i) => `THREAD_${i}_ID`)
+        ...(ROLE_TO_THREAD_ENABLED ? [
+            ...Array.from({length: 6}, (_, i) => `ROLE_${i}_ID`),
+            ...Array.from({length: 6}, (_, i) => `THREAD_${i}_ID`)
+        ] : [])
     ];
 
     const missingVariables = requiredVariables.filter(varName => !process.env[varName]);
@@ -77,8 +81,10 @@ async function validateEnvironmentVariables() {
 
     const idVariables = [
         'MAIN_CHANNEL_ID',
-        ...Array.from({length: 6}, (_, i) => `ROLE_${i}_ID`),
-        ...Array.from({length: 6}, (_, i) => `THREAD_${i}_ID`)
+        ...(ROLE_TO_THREAD_ENABLED ? [
+            ...Array.from({length: 6}, (_, i) => `ROLE_${i}_ID`),
+            ...Array.from({length: 6}, (_, i) => `THREAD_${i}_ID`)
+        ] : [])
     ];
 
     idVariables.forEach(varName => {
@@ -97,6 +103,22 @@ async function validateEnvironmentVariables() {
     if (isNaN(parseInt(process.env.DB_TIMEOUT)) || parseInt(process.env.DB_TIMEOUT) < 0) {
         logWithTimestamp('Invalid DB_TIMEOUT value. Must be a positive number.', 'ERROR');
         process.exit(1);
+    }
+
+    if (process.env.THREAD_CLEANUP_SCHEDULE) {
+        const cron = require('node-cron');
+        if (!cron.validate(process.env.THREAD_CLEANUP_SCHEDULE)) {
+            logWithTimestamp(`Invalid THREAD_CLEANUP_SCHEDULE cron expression: ${process.env.THREAD_CLEANUP_SCHEDULE}`, 'ERROR');
+            process.exit(1);
+        }
+    }
+
+    if (process.env.THREAD_INACTIVITY_DAYS !== undefined) {
+        const days = parseInt(process.env.THREAD_INACTIVITY_DAYS);
+        if (isNaN(days) || days <= 0) {
+            logWithTimestamp('Invalid THREAD_INACTIVITY_DAYS value. Must be a positive integer.', 'ERROR');
+            process.exit(1);
+        }
     }
     
     // Add logging for command permission configuration
@@ -540,6 +562,54 @@ async function handleFetchLinksCommand(message) {
     }
 }
 
+async function handleCleanupThreadCommand(message) {
+    try {
+        if (!hasCommandPermission(message.member)) {
+            const embed = new EmbedBuilder()
+                .setColor(ERROR_COLOR)
+                .setDescription(`${message.author}, you don't have permission to use this command. Only server administrators can use it.`)
+                .setFooter({
+                    text: 'Botanix Labs',
+                    iconURL: 'https://a-us.storyblok.com/f/1014909/512x512/026e26392f/dark_512-1.png'
+                });
+            await message.reply({ embeds: [embed] });
+            logWithTimestamp(`Command access denied for user ${message.author.tag} (${message.author.id}) - Administrator permission required`, 'WARN');
+            return;
+        }
+
+        if (!message.channel.isThread()) {
+            await message.reply('This command must be used inside a thread.');
+            return;
+        }
+
+        const threadId = message.channel.id;
+
+        if (ROLE_TO_THREAD_ENABLED) {
+            // Only allow configured threads
+            const configuredThreadIds = Array.from({length: 6}, (_, i) => process.env[`THREAD_${i}_ID`]).filter(Boolean);
+            if (!configuredThreadIds.includes(threadId)) {
+                await message.reply('This thread is not configured for cleanup. Use this command inside a configured role thread.');
+                return;
+            }
+        } else {
+            // Allow any thread under the main channel
+            const parent = await message.channel.parent?.fetch().catch(() => null);
+            if (!parent || parent.id !== process.env.MAIN_CHANNEL_ID) {
+                await message.reply('This command can only be used in threads that belong to the monitored forum channel.');
+                return;
+            }
+        }
+
+        const processingMsg = await message.reply('Running thread cleanup, please wait...');
+        await threadCleaner.cleanSpecificThread(threadId);
+        await processingMsg.edit('Thread cleanup completed.');
+        logWithTimestamp(`Manual cleanup triggered for thread ${threadId} by ${message.author.tag}`, 'INFO');
+    } catch (error) {
+        logWithTimestamp(`Error handling cleanup thread command: ${error.message}`, 'ERROR');
+        await message.reply('An error occurred while running cleanup: ' + error.message).catch(() => {});
+    }
+}
+
 // Cache cleanup
 setInterval(() => {
     const now = Date.now();
@@ -560,11 +630,14 @@ setInterval(() => {
 // Create instances - MODIFIED: Create a single UrlStorage instance and pass it to UrlTracker
 const urlStore = new UrlStorage();
 const urlTracker = new UrlTracker(client, urlStore); // Pass the existing instance
+const activityStore = new ActivityStore();
+const threadCleaner = new ThreadCleaner(client, activityStore);
 
 client.once('ready', async () => {
     try {
         await urlStore.init();  // Initialize urlStore first
         await urlTracker.init(); // Then initialize urlTracker
+        await activityStore.init(); // Initialize activity store
         initializeMappings();
         
         const mainChannel = await client.channels.fetch(process.env.MAIN_CHANNEL_ID);
@@ -579,6 +652,14 @@ client.once('ready', async () => {
 
         // URL cleanup has been disabled
         logWithTimestamp('URL cleanup has been disabled - URLs will be kept forever', 'CONFIG');
+
+        // Initialize thread cleaner with cron schedule
+        if (threadCleaner.init(THREAD_CLEANUP_SCHEDULE)) {
+            logWithTimestamp(`Thread cleaner scheduled: ${THREAD_CLEANUP_SCHEDULE}`, 'CONFIG');
+        } else {
+            logWithTimestamp('Failed to initialize thread cleaner', 'ERROR');
+        }
+        logWithTimestamp(`ROLE_TO_THREAD routing: ${ROLE_TO_THREAD_ENABLED ? 'enabled' : 'disabled'}`, 'CONFIG');
         
     } catch (error) {
         logWithTimestamp(`Initialization error: ${error.message}`, 'FATAL');
@@ -596,6 +677,12 @@ client.on('messageCreate', async (message) => {
             return;
         }
 
+        // Handle cleanup thread command
+        if (message.content === '!cleanup thread') {
+            await handleCleanupThreadCommand(message);
+            return;
+        }
+
         const isForumPost = await isMessageInForumPost(message);
         if (!isForumPost) return;
 
@@ -604,20 +691,29 @@ client.on('messageCreate', async (message) => {
             return;
         }
 
+        // Track activity for every message in a monitored forum post (non-blocking)
+        activityStore.updateActivity(message.channel.id, message.author.id, message.createdTimestamp)
+            .catch(err => logWithTimestamp(`Failed to update activity for user ${message.author.id} in thread ${message.channel.id}: ${err.message}`, 'ERROR'));
+
         const threadNameData = await getThreadName(message.channel.id);
         try {
             if (checkRateLimit(message.author.id)) return;
 
-            if (message.member.roles.cache.some(role => ignoredRoles.has(role.id))) return;
+            if (ROLE_TO_THREAD_ENABLED) {
+                if (message.member.roles.cache.some(role => ignoredRoles.has(role.id))) return;
 
-            const highestRoleIndex = findHighestRole(message.member.roles.cache);
-            if (highestRoleIndex === -1) return;
+                const highestRoleIndex = findHighestRole(message.member.roles.cache);
+                if (highestRoleIndex === -1) return;
 
-            const correctThreadId = process.env[`THREAD_${highestRoleIndex}_ID`];
-            
-            if (message.channel.id !== correctThreadId) {
-                await handleWrongThread(message, correctThreadId);
-                return;
+                const correctThreadId = process.env[`THREAD_${highestRoleIndex}_ID`];
+
+                if (message.channel.id !== correctThreadId) {
+                    await handleWrongThread(message, correctThreadId);
+                    return;
+                }
+            } else {
+                // When role routing is disabled, still respect IGNORED_ROLES for URL tracking
+                if (message.member.roles.cache.some(role => ignoredRoles.has(role.id))) return;
             }
 
             const urls = message.content.match(urlTracker.urlRegex);
@@ -667,6 +763,8 @@ process.on('unhandledRejection', async (reason, promise) => {
 
 process.on('SIGINT', () => {
     logWithTimestamp('Shutting down...', 'SHUTDOWN');
+    activityStore.shutdown();
+    threadCleaner.stop();
     urlStore.shutdown();
     urlTracker.shutdown();
     client.destroy();
@@ -675,6 +773,8 @@ process.on('SIGINT', () => {
 
 process.on('SIGTERM', () => {
     logWithTimestamp('Shutting down...', 'SHUTDOWN');
+    activityStore.shutdown();
+    threadCleaner.stop();
     urlStore.shutdown();
     urlTracker.shutdown();
     client.destroy();

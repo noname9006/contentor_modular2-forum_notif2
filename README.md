@@ -36,11 +36,13 @@ Contentor is a Node.js Discord bot built for community forum management. It watc
 
 - **URL tracking** — Stores every URL shared in a forum channel with full metadata (author, thread, timestamp, message link)
 - **Duplicate detection** — Catches cross-user duplicates and same-user reposts across threads or within the same thread
-- **Role-based thread routing** — Maps six permission tiers (roles) to six corresponding threads and warns users who post in the wrong one
+- **Role-based thread routing** — Maps six permission tiers (roles) to six corresponding threads and warns users who post in the wrong one (can be disabled via `ROLE_TO_THREAD=off`)
 - **Configurable Twitter/X block** — Optionally deletes messages containing a specific Twitter URL pattern and warns the author
 - **Admin fetch command** — Bulk-imports existing URLs from any channel into the database
 - **Violation logging** — Sends detailed log embeds (with evidence links) to a dedicated log channel
 - **Rate limiting** — Per-user request throttling to prevent abuse
+- **Thread cleanup** — Scheduled removal of inactive or mismatched users from configured threads
+- **Activity tracking** — Records last-post timestamp per user per thread, persisted to disk
 - **Graceful shutdown** — Saves state and cleans up on SIGINT/SIGTERM
 
 ---
@@ -98,6 +100,7 @@ URL_CHECK_TIMEOUT=5000
 
 # ── Role-to-Thread Mapping (6 tiers, 0–5) ───────────────────────────────────
 # Each ROLE_N maps to THREAD_N. Users with ROLE_N should post in THREAD_N.
+# Required only when ROLE_TO_THREAD=on (the default).
 
 ROLE_0_ID=111111111111111111
 ROLE_1_ID=222222222222222222
@@ -112,6 +115,20 @@ THREAD_2_ID=999999999999999999
 THREAD_3_ID=101010101010101010
 THREAD_4_ID=111111111111111112
 THREAD_5_ID=121212121212121212
+
+# ── Thread Cleanup ────────────────────────────────────────────────────────────
+
+# Enable or disable role-to-thread routing and role-based cleanup (default: on)
+ROLE_TO_THREAD=on
+
+# Cron schedule for automated thread member cleanup (default: every 6 hours)
+THREAD_CLEANUP_SCHEDULE=0 */6 * * *
+
+# Days of inactivity before a user is removed from a thread (only when ROLE_TO_THREAD=off)
+THREAD_INACTIVITY_DAYS=30
+
+# Comma-separated role IDs exempt from cleanup removal (separate from IGNORED_ROLES)
+IGNORED_ROLES_CLEANUP=111111111111111111,222222222222222222
 
 # ── Optional ─────────────────────────────────────────────────────────────────
 
@@ -143,14 +160,18 @@ THRESHOLD_DUPE_AGE=60
 | `AUTO_DELETE_TIMER` | | `30` | Seconds before bot reply is auto-deleted |
 | `DB_TIMEOUT` | | `1` | Database operation timeout (minutes) |
 | `URL_CHECK_TIMEOUT` | | `5000` | Delay before URL processing (ms) |
-| `ROLE_0_ID` … `ROLE_5_ID` | ✅ | — | Six role IDs for tier mapping |
-| `THREAD_0_ID` … `THREAD_5_ID` | ✅ | — | Six thread IDs corresponding to each role |
+| `ROLE_0_ID` … `ROLE_5_ID` | ✅ when `ROLE_TO_THREAD=on` | — | Six role IDs for tier mapping |
+| `THREAD_0_ID` … `THREAD_5_ID` | ✅ when `ROLE_TO_THREAD=on` | — | Six thread IDs corresponding to each role |
 | `IGNORED_ROLES` | | — | Comma-separated role IDs to skip |
 | `BOTANIX_TWITTER` | | — | Twitter URL pattern to block |
 | `LOG_CHANNEL_ID` | | — | Channel for violation log embeds |
 | `RATE_LIMIT_MAX_REQUESTS` | | `5` | Max requests per cooldown |
 | `RATE_LIMIT_COOLDOWN` | | `1000` | Cooldown window in ms |
 | `THRESHOLD_DUPE_AGE` | | `60` | Minutes before a deleted URL can be reposted |
+| `ROLE_TO_THREAD` | | `on` | `on` = enforce role/thread routing and role-based cleanup; `off` = no routing, use time-based cleanup |
+| `THREAD_CLEANUP_SCHEDULE` | | `0 */6 * * *` | Cron expression for scheduled cleanup |
+| `THREAD_INACTIVITY_DAYS` | | `30` | Days of inactivity before removal (time-based mode only) |
+| `IGNORED_ROLES_CLEANUP` | | — | Comma-separated role IDs never removed by cleanup |
 
 ---
 
@@ -188,6 +209,15 @@ The bot replies with an embed summarising:
 - New URLs added during this fetch
 - Save success/failure status
 
+### `!cleanup thread`
+
+Immediately runs the thread cleanup on the current thread.
+
+- Must be used inside a thread.
+- Requires Administrator permission.
+- When `ROLE_TO_THREAD=on`: only works in threads configured as `THREAD_n_ID`.
+- When `ROLE_TO_THREAD=off`: works in any thread that is a child of `MAIN_CHANNEL_ID`.
+
 ---
 
 ## URL Duplicate Detection Logic
@@ -212,7 +242,10 @@ When a message containing a URL is posted in a monitored forum thread, the bot e
 contentoor.js          ← Discord client setup, event routing, role enforcement
     │
     ├── UrlTracker     ← Duplicate detection, bulk fetch, violation logging
-    │       └── UrlStorage  ← JSON-file persistence layer
+    │       └── UrlStorage     ← JSON-file persistence (URL_DB_<id>.json)
+    │
+    ├── ThreadCleaner  ← Scheduled/manual thread member cleanup
+    │       └── ActivityStore  ← JSON-file persistence (ACTIVITY_DB_<id>.json)
     │
     ├── config.js      ← Environment variable parsing & validation
     └── utils.js       ← Shared helpers (timestamp logger)
@@ -249,6 +282,16 @@ URLs are persisted to a JSON file named `URL_DB_<channelId>.json` in the project
 }
 ```
 
+Activity data is persisted to `ACTIVITY_DB_<channelId>.json`:
+
+```json
+{
+  "<threadId>": {
+    "<userId>": 1700000000000
+  }
+}
+```
+
 These files are excluded from version control via `.gitignore`.
 
 ---
@@ -260,6 +303,8 @@ contentor_modular2-forum_notif2/
 ├── contentoor.js       # Main bot entry point
 ├── urltracker.js       # URL tracking and duplicate detection
 ├── urlStore.js         # JSON file persistence layer
+├── scheduler.js        # Thread cleanup scheduler (role-based or time-based)
+├── activityStore.js    # Activity timestamp persistence layer
 ├── config.js           # Environment variable configuration
 ├── utils.js            # Utility helpers
 ├── package.json        # Project metadata and dependencies
