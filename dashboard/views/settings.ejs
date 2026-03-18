@@ -311,13 +311,19 @@ function removeSelectedRole(i) {
   renderSelectedRoles();
 }
 
-document.getElementById('role-search').addEventListener('input', function () {
-  const q = this.value.toLowerCase();
-  if (!q) { hideSuggestions('role-suggestions'); return; }
+function showRoleSuggestions(q) {
   const filtered = allRoles
-    .filter(r => r.name.toLowerCase().startsWith(q) && !selectedRoles.some(s => s.id === r.id))
+    .filter(r => (!q || r.name.toLowerCase().includes(q)) && !selectedRoles.some(s => s.id === r.id))
     .slice(0, 8);
   showSuggestions('role-suggestions', filtered, selectRole);
+}
+
+document.getElementById('role-search').addEventListener('focus', function () {
+  showRoleSuggestions('');
+});
+
+document.getElementById('role-search').addEventListener('input', function () {
+  showRoleSuggestions(this.value.toLowerCase());
 });
 
 document.getElementById('role-search').addEventListener('blur', () => {
@@ -392,16 +398,22 @@ function clearChannel() {
   updateThreadChip();
 }
 
-document.getElementById('channel-search').addEventListener('input', function () {
-  const q = this.value.toLowerCase();
-  if (!q) { hideSuggestions('channel-suggestions'); return; }
+function showChannelSuggestions(q) {
   const filtered = allChannels
-    .filter(c => c.name.toLowerCase().startsWith(q))
+    .filter(c => !q || c.name.toLowerCase().includes(q))
     .slice(0, 8);
   showSuggestions('channel-suggestions', filtered, ch => {
     setSelectedChannel(ch);
     fetchThreads(ch.id);
   });
+}
+
+document.getElementById('channel-search').addEventListener('focus', function () {
+  showChannelSuggestions('');
+});
+
+document.getElementById('channel-search').addEventListener('input', function () {
+  showChannelSuggestions(this.value.toLowerCase());
 });
 
 document.getElementById('channel-search').addEventListener('blur', () => {
@@ -436,13 +448,19 @@ async function fetchThreads(channelId) {
   }
 }
 
-document.getElementById('thread-search').addEventListener('input', function () {
-  const q = this.value.toLowerCase();
-  if (!q) { hideSuggestions('thread-suggestions'); return; }
+function showThreadSuggestions(q) {
   const filtered = allThreads
-    .filter(t => t.name.toLowerCase().startsWith(q))
+    .filter(t => !q || t.name.toLowerCase().includes(q))
     .slice(0, 8);
   showSuggestions('thread-suggestions', filtered, selectThread);
+}
+
+document.getElementById('thread-search').addEventListener('focus', function () {
+  showThreadSuggestions('');
+});
+
+document.getElementById('thread-search').addEventListener('input', function () {
+  showThreadSuggestions(this.value.toLowerCase());
 });
 
 document.getElementById('thread-search').addEventListener('blur', () => {
