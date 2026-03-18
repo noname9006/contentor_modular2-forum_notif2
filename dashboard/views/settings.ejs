@@ -105,6 +105,8 @@
 <div id="save-msg" style="display:none;position:fixed;bottom:1.5rem;right:1.5rem;background:var(--success);color:#fff;padding:10px 18px;border-radius:8px;font-size:0.9rem;z-index:999"></div>
 
 <script>
+const CSRF_TOKEN = '<%= locals.csrfToken %>';
+
 function showMsg(text, isError) {
   const el = document.getElementById('save-msg');
   el.textContent = text;
@@ -116,7 +118,7 @@ function showMsg(text, isError) {
 async function apiPost(url, data) {
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN },
     body: JSON.stringify(data)
   });
   return res.json();

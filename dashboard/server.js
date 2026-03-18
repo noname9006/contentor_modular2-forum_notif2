@@ -27,9 +27,13 @@ if (!process.env.SESSION_SECRET) {
 const PORT = parseInt(process.env.DASHBOARD_PORT) || 3001;
 const DB_PATH = process.env.VOTING_DB_PATH || path.join(__dirname, '..', 'voting.db');
 
-// Open DB in read-only mode for the dashboard (writes done by bot process)
+// Open DB in read-only mode for reads. A separate writable connection handles settings writes.
 const db = new Database(DB_PATH, { readonly: true });
 db.pragma('journal_mode = WAL');
+
+// Single writable connection for settings mutations — reused across requests to avoid locking churn.
+const dbWrite = new Database(DB_PATH);
+dbWrite.pragma('journal_mode = WAL');
 
 // ── Express app ────────────────────────────────────────────────────────────────
 const app = express();
@@ -53,7 +57,35 @@ app.use(session({
     },
 }));
 
-// ── Rate limiters ──────────────────────────────────────────────────────────────
+// ── CSRF protection ────────────────────────────────────────────────────────────
+// Generate a per-session CSRF token using the built-in crypto module.
+const crypto = require('crypto');
+
+function generateCsrfToken(req) {
+    if (!req.session.csrfToken) {
+        req.session.csrfToken = crypto.randomBytes(32).toString('hex');
+    }
+    return req.session.csrfToken;
+}
+
+function csrfProtect(req, res, next) {
+    if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
+        return next();
+    }
+    const token = req.body._csrf || req.headers['x-csrf-token'];
+    if (!token || token !== req.session.csrfToken) {
+        return res.status(403).json({ error: 'Invalid CSRF token' });
+    }
+    next();
+}
+
+// Expose CSRF token to all views via res.locals
+app.use((req, res, next) => {
+    res.locals.csrfToken = generateCsrfToken(req);
+    next();
+});
+
+
 const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 60,
@@ -90,15 +122,10 @@ function getAllSettings() {
     return result;
 }
 
-// Write helper — opens a separate writable connection just for settings writes.
+// Write helper — uses the shared writable connection.
 function writeSetting(key, value) {
-    const writable = new Database(DB_PATH);
-    try {
-        const serialized = typeof value === 'string' ? value : JSON.stringify(value);
-        writable.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, serialized);
-    } finally {
-        writable.close();
-    }
+    const serialized = typeof value === 'string' ? value : JSON.stringify(value);
+    dbWrite.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, serialized);
 }
 
 function normalizeTimeframe(tf) {
@@ -113,7 +140,7 @@ app.get('/login', (req, res) => {
     res.render('login', { error: null });
 });
 
-app.post('/login', loginLimiter, async (req, res) => {
+app.post('/login', loginLimiter, csrfProtect, async (req, res) => {
     const { password } = req.body;
     if (!password) return res.render('login', { error: 'Password is required.' });
 
@@ -171,7 +198,7 @@ app.get('/settings', requireAuth, (req, res) => {
 });
 
 // ── API Routes ─────────────────────────────────────────────────────────────────
-app.use('/api', apiLimiter);
+app.use('/api', apiLimiter, csrfProtect);
 
 // Save settings
 app.post('/api/settings', requireAuth, (req, res) => {

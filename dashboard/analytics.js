@@ -28,7 +28,13 @@ function getTimeRange(timeframe) {
  */
 function getMultiVoteMode(db) {
     const row = db.prepare("SELECT value FROM settings WHERE key = 'multi_vote_mode'").get();
-    return row ? row.value.replace(/^"|"$/g, '') : 'highest';
+    if (!row) return 'highest';
+    try {
+        const parsed = JSON.parse(row.value);
+        return typeof parsed === 'string' ? parsed : 'highest';
+    } catch {
+        return row.value || 'highest';
+    }
 }
 
 /**

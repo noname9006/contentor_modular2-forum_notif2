@@ -145,17 +145,20 @@ class VoteHandler {
             postedAt: message.createdTimestamp,
         });
 
-        // Cache author info
-        getUserInfo(message.author.id, this.client).catch(() => {});
+        // Cache author info (best-effort, non-critical)
+        getUserInfo(message.author.id, this.client).catch(err =>
+            logWithTimestamp(`User cache update failed for ${message.author.id}: ${err.message}`, 'WARN')
+        );
 
         // Add reactions sequentially with delay
-        for (const emoji of this.voteEmojis) {
+        for (let i = 0; i < this.voteEmojis.length; i++) {
+            const emoji = this.voteEmojis[i];
             try {
                 await message.react(emoji);
             } catch (err) {
                 logWithTimestamp(`Failed to react with ${emoji} on ${message.id}: ${err.message}`, 'WARN');
             }
-            if (emoji !== this.voteEmojis[this.voteEmojis.length - 1]) {
+            if (i < this.voteEmojis.length - 1) {
                 await new Promise(resolve => setTimeout(resolve, REACTION_DELAY_MS));
             }
         }
@@ -238,8 +241,10 @@ class VoteHandler {
             logWithTimestamp(`Failed to insert vote: ${err.message}`, 'ERROR');
         }
 
-        // Cache voter info
-        getUserInfo(user.id, this.client).catch(() => {});
+        // Cache voter info (best-effort, non-critical)
+        getUserInfo(user.id, this.client).catch(err =>
+            logWithTimestamp(`User cache update failed for ${user.id}: ${err.message}`, 'WARN')
+        );
     }
 
     async _onReactionRemove(reaction, user) {
