@@ -62,6 +62,7 @@ const DEFAULT_SETTINGS = [
     ['tracked_roles', '[]'],
     ['multi_vote_mode', 'highest'],
     ['vote_emojis', JSON.stringify(['🧊', '🌤️', '⚡', '🔥', '💥'])],
+    ['vote_emoji_weights', JSON.stringify([0, 1, 2, 3, 4])],
     ['dashboard_password_hash', ''],
 ];
 

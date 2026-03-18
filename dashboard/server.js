@@ -8,6 +8,7 @@ const bcrypt = require('bcrypt');
 const rateLimit = require('express-rate-limit');
 const Database = require('better-sqlite3');
 const path = require('path');
+const https = require('https');
 
 const {
     getTimeRange,
@@ -132,6 +133,53 @@ function normalizeTimeframe(tf) {
     return ['24h', '7d', '30d', '90d', 'all'].includes(tf) ? tf : 'all';
 }
 
+// ── Discord REST helpers ────────────────────────────────────────────────────────
+
+function discordGet(apiPath) {
+    return new Promise((resolve, reject) => {
+        const token = process.env.DISCORD_TOKEN;
+        if (!token) return reject(new Error('DISCORD_TOKEN not set'));
+        const options = {
+            hostname: 'discord.com',
+            path: `/api/v10${apiPath}`,
+            method: 'GET',
+            headers: {
+                'Authorization': `Bot ${token}`,
+                'User-Agent': 'VotingDashboard/1.0',
+            },
+        };
+        const req = https.request(options, (res) => {
+            let data = '';
+            res.on('data', chunk => { data += chunk; });
+            res.on('end', () => {
+                try { resolve(JSON.parse(data)); } catch (parseErr) {
+                    console.error('Discord API parse error:', parseErr.message, '| path:', apiPath, '| raw:', data.slice(0, 200));
+                    resolve(null);
+                }
+            });
+        });
+        req.on('error', reject);
+        req.end();
+    });
+}
+
+let cachedGuildId = null;
+async function getGuildId() {
+    if (cachedGuildId) return cachedGuildId;
+    if (process.env.GUILD_ID) {
+        cachedGuildId = process.env.GUILD_ID;
+        return cachedGuildId;
+    }
+    const channelId = process.env.MAIN_CHANNEL_ID;
+    if (!channelId) return null;
+    const channel = await discordGet(`/channels/${channelId}`);
+    if (channel && channel.guild_id) {
+        cachedGuildId = channel.guild_id;
+        return cachedGuildId;
+    }
+    return null;
+}
+
 // ── Routes ─────────────────────────────────────────────────────────────────────
 
 // Login
@@ -200,10 +248,12 @@ app.get('/settings', requireAuth, (req, res) => {
 // ── API Routes ─────────────────────────────────────────────────────────────────
 app.use('/api', apiLimiter, csrfProtect);
 
+const VOTE_EMOJI_COUNT = 5;
+
 // Save settings
 app.post('/api/settings', requireAuth, (req, res) => {
     try {
-        const { tracked_forum_id, tracked_roles, multi_vote_mode, vote_emojis } = req.body;
+        const { tracked_forum_id, tracked_roles, multi_vote_mode, vote_emojis, vote_emoji_weights } = req.body;
 
         if (tracked_forum_id !== undefined) {
             writeSetting('tracked_forum_id', String(tracked_forum_id).trim());
@@ -217,6 +267,10 @@ app.post('/api/settings', requireAuth, (req, res) => {
                 roles = tracked_roles;
             }
             if (!Array.isArray(roles)) roles = [];
+            roles = roles.map(r => {
+                const weight = (typeof r.weight === 'number' && isFinite(r.weight) && r.weight >= 0) ? r.weight : 1;
+                return { id: String(r.id || ''), name: String(r.name || ''), position: parseInt(r.position) || 0, weight };
+            }).filter(r => r.id);
             writeSetting('tracked_roles', roles);
         }
 
@@ -235,10 +289,24 @@ app.post('/api/settings', requireAuth, (req, res) => {
             } else {
                 emojis = vote_emojis;
             }
-            if (!Array.isArray(emojis) || emojis.length !== 5) {
+            if (!Array.isArray(emojis) || emojis.length !== VOTE_EMOJI_COUNT) {
                 return res.status(400).json({ error: 'vote_emojis must be an array of exactly 5 emojis' });
             }
             writeSetting('vote_emojis', emojis);
+        }
+
+        if (vote_emoji_weights !== undefined) {
+            let weights;
+            if (typeof vote_emoji_weights === 'string') {
+                try { weights = JSON.parse(vote_emoji_weights); } catch { weights = []; }
+            } else {
+                weights = vote_emoji_weights;
+            }
+            if (!Array.isArray(weights) || weights.length !== VOTE_EMOJI_COUNT ||
+                !weights.every(w => typeof w === 'number' && isFinite(w) && w >= 0)) {
+                return res.status(400).json({ error: 'vote_emoji_weights must be an array of exactly 5 non-negative numbers' });
+            }
+            writeSetting('vote_emoji_weights', weights);
         }
 
         res.json({ ok: true });
@@ -288,6 +356,68 @@ app.get('/api/leaderboard', requireAuth, (req, res) => {
     const stats = getStats(db, startMs, endMs);
 
     res.json({ topVoted, topVoters, stats, timeframe });
+});
+
+// Discord roles
+app.get('/api/discord/roles', requireAuth, async (req, res) => {
+    try {
+        const guildId = await getGuildId();
+        if (!guildId) return res.json({ roles: [] });
+        const data = await discordGet(`/guilds/${guildId}/roles`);
+        if (!Array.isArray(data)) return res.json({ roles: [] });
+        const roles = data
+            .map(r => ({ id: r.id, name: r.name, position: r.position, color: r.color }))
+            .sort((a, b) => b.position - a.position);
+        res.json({ roles });
+    } catch (err) {
+        console.error('Error fetching Discord roles:', err);
+        res.json({ roles: [] });
+    }
+});
+
+// Discord channels
+app.get('/api/discord/channels', requireAuth, async (req, res) => {
+    try {
+        const guildId = await getGuildId();
+        if (!guildId) return res.json({ channels: [] });
+        const data = await discordGet(`/guilds/${guildId}/channels`);
+        if (!Array.isArray(data)) return res.json({ channels: [] });
+        const channels = data
+            .map(c => ({ id: c.id, name: c.name, type: c.type, position: c.position }))
+            .sort((a, b) => (a.position || 0) - (b.position || 0));
+        res.json({ channels });
+    } catch (err) {
+        console.error('Error fetching Discord channels:', err);
+        res.json({ channels: [] });
+    }
+});
+
+// Discord threads
+app.get('/api/discord/threads', requireAuth, async (req, res) => {
+    const { channelId } = req.query;
+    if (!channelId || !/^\d+$/.test(String(channelId))) {
+        return res.json({ threads: [] });
+    }
+    try {
+        const [active, archived] = await Promise.allSettled([
+            discordGet(`/channels/${channelId}/threads/active`),
+            discordGet(`/channels/${channelId}/threads/archived/public`),
+        ]);
+        const threads = [];
+        if (active.status === 'fulfilled' && active.value && Array.isArray(active.value.threads)) {
+            threads.push(...active.value.threads);
+        }
+        if (archived.status === 'fulfilled' && archived.value && Array.isArray(archived.value.threads)) {
+            threads.push(...archived.value.threads);
+        }
+        const result = threads
+            .map(t => ({ id: t.id, name: t.name }))
+            .sort((a, b) => a.name.localeCompare(b.name));
+        res.json({ threads: result });
+    } catch (err) {
+        console.error('Error fetching Discord threads:', err);
+        res.json({ threads: [] });
+    }
 });
 
 // ── Start server ───────────────────────────────────────────────────────────────
