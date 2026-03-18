@@ -399,13 +399,15 @@ app.get('/api/discord/threads', requireAuth, async (req, res) => {
         return res.json({ threads: [] });
     }
     try {
+        const guildId = await getGuildId();
+        if (!guildId) return res.json({ threads: [] });
         const [active, archived] = await Promise.allSettled([
-            discordGet(`/channels/${channelId}/threads/active`),
+            discordGet(`/guilds/${guildId}/threads/active`),
             discordGet(`/channels/${channelId}/threads/archived/public`),
         ]);
         const threads = [];
         if (active.status === 'fulfilled' && active.value && Array.isArray(active.value.threads)) {
-            threads.push(...active.value.threads);
+            threads.push(...active.value.threads.filter(t => t.parent_id === channelId));
         }
         if (archived.status === 'fulfilled' && archived.value && Array.isArray(archived.value.threads)) {
             threads.push(...archived.value.threads);
