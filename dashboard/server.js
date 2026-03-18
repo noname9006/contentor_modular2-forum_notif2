@@ -1,0 +1,298 @@
+'use strict';
+
+require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
+
+const express = require('express');
+const session = require('express-session');
+const bcrypt = require('bcrypt');
+const rateLimit = require('express-rate-limit');
+const Database = require('better-sqlite3');
+const path = require('path');
+
+const {
+    getTimeRange,
+    getTopVotedUsers,
+    getTopVoters,
+    getPosts,
+    getPostsCount,
+    getStats,
+} = require('./analytics');
+
+// ── Env validation ─────────────────────────────────────────────────────────────
+if (!process.env.SESSION_SECRET) {
+    console.error('[FATAL] SESSION_SECRET environment variable is required');
+    process.exit(1);
+}
+
+const PORT = parseInt(process.env.DASHBOARD_PORT) || 3001;
+const DB_PATH = process.env.VOTING_DB_PATH || path.join(__dirname, '..', 'voting.db');
+
+// Open DB in read-only mode for reads. A separate writable connection handles settings writes.
+const db = new Database(DB_PATH, { readonly: true });
+db.pragma('journal_mode = WAL');
+
+// Single writable connection for settings mutations — reused across requests to avoid locking churn.
+const dbWrite = new Database(DB_PATH);
+dbWrite.pragma('journal_mode = WAL');
+
+// ── Express app ────────────────────────────────────────────────────────────────
+const app = express();
+
+app.set('view engine', 'ejs');
+app.set('views', path.join(__dirname, 'views'));
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
+
+// ── Session ────────────────────────────────────────────────────────────────────
+app.use(session({
+    secret: process.env.SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+        httpOnly: true,
+        sameSite: 'strict',
+        secure: process.env.NODE_ENV === 'production',
+        maxAge: 8 * 60 * 60 * 1000, // 8 hours
+    },
+}));
+
+// ── CSRF protection ────────────────────────────────────────────────────────────
+// Generate a per-session CSRF token using the built-in crypto module.
+const crypto = require('crypto');
+
+function generateCsrfToken(req) {
+    if (!req.session.csrfToken) {
+        req.session.csrfToken = crypto.randomBytes(32).toString('hex');
+    }
+    return req.session.csrfToken;
+}
+
+function csrfProtect(req, res, next) {
+    if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
+        return next();
+    }
+    const token = req.body._csrf || req.headers['x-csrf-token'];
+    if (!token || token !== req.session.csrfToken) {
+        return res.status(403).json({ error: 'Invalid CSRF token' });
+    }
+    next();
+}
+
+// Expose CSRF token to all views via res.locals
+app.use((req, res, next) => {
+    res.locals.csrfToken = generateCsrfToken(req);
+    next();
+});
+
+
+const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+// ── Auth middleware ────────────────────────────────────────────────────────────
+function requireAuth(req, res, next) {
+    if (req.session && req.session.authenticated) return next();
+    return res.redirect('/login');
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+function getSetting(key) {
+    const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+    if (!row) return null;
+    try { return JSON.parse(row.value); } catch { return row.value; }
+}
+
+function getAllSettings() {
+    const rows = db.prepare('SELECT key, value FROM settings').all();
+    const result = {};
+    for (const row of rows) {
+        try { result[row.key] = JSON.parse(row.value); } catch { result[row.key] = row.value; }
+    }
+    return result;
+}
+
+// Write helper — uses the shared writable connection.
+function writeSetting(key, value) {
+    const serialized = typeof value === 'string' ? value : JSON.stringify(value);
+    dbWrite.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, serialized);
+}
+
+function normalizeTimeframe(tf) {
+    return ['24h', '7d', '30d', '90d', 'all'].includes(tf) ? tf : 'all';
+}
+
+// ── Routes ─────────────────────────────────────────────────────────────────────
+
+// Login
+app.get('/login', (req, res) => {
+    if (req.session && req.session.authenticated) return res.redirect('/');
+    res.render('login', { error: null });
+});
+
+app.post('/login', loginLimiter, csrfProtect, async (req, res) => {
+    const { password } = req.body;
+    if (!password) return res.render('login', { error: 'Password is required.' });
+
+    const hash = getSetting('dashboard_password_hash');
+    if (!hash) {
+        return res.render('login', { error: 'Dashboard password is not configured. Set DASHBOARD_PASSWORD in .env.' });
+    }
+
+    const match = await bcrypt.compare(String(password), String(hash));
+    if (!match) return res.render('login', { error: 'Incorrect password.' });
+
+    req.session.authenticated = true;
+    res.redirect('/');
+});
+
+app.get('/logout', (req, res) => {
+    req.session.destroy(() => res.redirect('/login'));
+});
+
+// Root redirect
+app.get('/', requireAuth, (req, res) => res.redirect('/leaderboard'));
+
+// Leaderboard page
+app.get('/leaderboard', requireAuth, (req, res) => {
+    const timeframe = normalizeTimeframe(req.query.timeframe);
+    const { startMs, endMs } = getTimeRange(timeframe);
+
+    const topVoted = getTopVotedUsers(db, startMs, endMs, 50);
+    const topVoters = getTopVoters(db, startMs, endMs, 50);
+    const stats = getStats(db, startMs, endMs);
+
+    res.render('leaderboard', { topVoted, topVoters, stats, timeframe });
+});
+
+// Posts page
+app.get('/posts', requireAuth, (req, res) => {
+    const timeframe = normalizeTimeframe(req.query.timeframe);
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const pageSize = 20;
+    const { startMs, endMs } = getTimeRange(timeframe);
+
+    const posts = getPosts(db, startMs, endMs, page, pageSize);
+    const totalCount = getPostsCount(db, startMs, endMs);
+    const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+
+    res.render('posts', { posts, page, totalPages, timeframe });
+});
+
+// Settings page
+app.get('/settings', requireAuth, (req, res) => {
+    const settings = getAllSettings();
+    // Never send the password hash to the view
+    delete settings.dashboard_password_hash;
+    res.render('settings', { settings, saved: req.query.saved === '1', error: null });
+});
+
+// ── API Routes ─────────────────────────────────────────────────────────────────
+app.use('/api', apiLimiter, csrfProtect);
+
+// Save settings
+app.post('/api/settings', requireAuth, (req, res) => {
+    try {
+        const { tracked_forum_id, tracked_roles, multi_vote_mode, vote_emojis } = req.body;
+
+        if (tracked_forum_id !== undefined) {
+            writeSetting('tracked_forum_id', String(tracked_forum_id).trim());
+        }
+
+        if (tracked_roles !== undefined) {
+            let roles;
+            if (typeof tracked_roles === 'string') {
+                try { roles = JSON.parse(tracked_roles); } catch { roles = []; }
+            } else {
+                roles = tracked_roles;
+            }
+            if (!Array.isArray(roles)) roles = [];
+            writeSetting('tracked_roles', roles);
+        }
+
+        if (multi_vote_mode !== undefined) {
+            const allowed = ['highest', 'lowest', 'average', 'ignore'];
+            if (!allowed.includes(multi_vote_mode)) {
+                return res.status(400).json({ error: 'Invalid multi_vote_mode' });
+            }
+            writeSetting('multi_vote_mode', multi_vote_mode);
+        }
+
+        if (vote_emojis !== undefined) {
+            let emojis;
+            if (typeof vote_emojis === 'string') {
+                try { emojis = JSON.parse(vote_emojis); } catch { emojis = []; }
+            } else {
+                emojis = vote_emojis;
+            }
+            if (!Array.isArray(emojis) || emojis.length !== 5) {
+                return res.status(400).json({ error: 'vote_emojis must be an array of exactly 5 emojis' });
+            }
+            writeSetting('vote_emojis', emojis);
+        }
+
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('Error saving settings:', err);
+        res.status(500).json({ error: 'Failed to save settings' });
+    }
+});
+
+// Change password
+app.post('/api/settings/password', requireAuth, async (req, res) => {
+    try {
+        const { currentPassword, newPassword } = req.body;
+
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({ error: 'currentPassword and newPassword are required' });
+        }
+        if (String(newPassword).length < 8) {
+            return res.status(400).json({ error: 'New password must be at least 8 characters' });
+        }
+
+        const hash = getSetting('dashboard_password_hash');
+        if (!hash) {
+            return res.status(400).json({ error: 'No password is set. Configure DASHBOARD_PASSWORD in .env first.' });
+        }
+
+        const match = await bcrypt.compare(String(currentPassword), String(hash));
+        if (!match) return res.status(403).json({ error: 'Current password is incorrect' });
+
+        const newHash = await bcrypt.hash(String(newPassword), 12);
+        writeSetting('dashboard_password_hash', newHash);
+
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('Error changing password:', err);
+        res.status(500).json({ error: 'Failed to change password' });
+    }
+});
+
+// JSON leaderboard (AJAX)
+app.get('/api/leaderboard', requireAuth, (req, res) => {
+    const timeframe = normalizeTimeframe(req.query.timeframe);
+    const { startMs, endMs } = getTimeRange(timeframe);
+
+    const topVoted = getTopVotedUsers(db, startMs, endMs, 50);
+    const topVoters = getTopVoters(db, startMs, endMs, 50);
+    const stats = getStats(db, startMs, endMs);
+
+    res.json({ topVoted, topVoters, stats, timeframe });
+});
+
+// ── Start server ───────────────────────────────────────────────────────────────
+app.listen(PORT, () => {
+    console.log(`[Dashboard] Listening on http://localhost:${PORT}`);
+});
+
+module.exports = app; // for testing

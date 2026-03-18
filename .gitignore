@@ -13,6 +13,9 @@ npm-debug.log*
 # Database files
 URL_DB_*.json
 ACTIVITY_DB_*.json
+*.db
+*.db-shm
+*.db-wal
 
 # OS files
 .DS_Store
