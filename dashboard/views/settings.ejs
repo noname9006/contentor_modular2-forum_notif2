@@ -1,5 +1,74 @@
 <%- include('partials/header', { page: 'settings' }) %>
 
+<style>
+  input[type="number"] {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 8px 12px;
+    font-size: 0.9rem;
+    outline: none;
+    transition: border-color 0.15s;
+    width: 100%;
+  }
+  input[type="number"]:focus { border-color: var(--accent); }
+
+  .picker-wrap { position: relative; margin-bottom: 0.8rem; }
+
+  .suggestions-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    z-index: 100;
+    max-height: 240px;
+    overflow-y: auto;
+    margin-top: 2px;
+  }
+  .suggestion-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    color: var(--text);
+  }
+  .suggestion-item:hover { background: rgba(114,137,218,0.2); }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 4px 10px;
+    font-size: 0.85rem;
+    color: var(--text);
+  }
+  .chip .rm-btn {
+    background: none;
+    border: none;
+    color: var(--danger);
+    cursor: pointer;
+    font-size: 0.9rem;
+    line-height: 1;
+    padding: 0 2px;
+  }
+
+  .color-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: inline-block;
+  }
+
+  .role-item input[type="number"] { flex: 0 0 auto; width: 70px; }
+</style>
+
 <h1>Settings</h1>
 
 <% if (saved) { %>
@@ -8,41 +77,52 @@
 
 <!-- ── Forum Channel ── -->
 <div class="settings-section">
-  <h2>📡 Tracked Forum Channel</h2>
-  <form id="form-channel">
-    <div class="form-group">
-      <label for="tracked_forum_id">Forum Channel ID</label>
-      <input type="text" id="tracked_forum_id" name="tracked_forum_id"
-             value="<%= settings.tracked_forum_id || '' %>"
-             placeholder="Enter Discord channel ID" />
+  <h2>Tracked Forum Channel</h2>
+  <div id="loading-channels" style="color:var(--text-muted);font-size:0.85rem;margin-bottom:0.5rem">Loading channels…</div>
+  <div id="channels-error" class="alert alert-error" style="display:none"></div>
+  <div class="picker-wrap">
+    <input type="text" id="channel-search" placeholder="Search channels…" autocomplete="off" />
+    <div id="channel-suggestions" class="suggestions-dropdown" style="display:none"></div>
+  </div>
+  <div id="selected-channel-wrap" style="display:none;margin-bottom:0.8rem">
+    <span class="chip">
+      <span id="selected-channel-name"></span>
+      <button type="button" class="rm-btn" onclick="clearChannel()">✕</button>
+    </span>
+  </div>
+  <div id="thread-section" style="display:none">
+    <div id="loading-threads" style="color:var(--text-muted);font-size:0.85rem;margin-bottom:0.5rem;display:none">Loading threads…</div>
+    <div id="threads-error" class="alert alert-error" style="display:none"></div>
+    <div class="picker-wrap">
+      <input type="text" id="thread-search" placeholder="Filter threads (optional)…" autocomplete="off" />
+      <div id="thread-suggestions" class="suggestions-dropdown" style="display:none"></div>
     </div>
-    <button type="submit" class="btn btn-primary">Save</button>
-  </form>
+    <div id="selected-thread-wrap" style="display:none;margin-bottom:0.8rem">
+      <span class="chip">
+        <span id="selected-thread-name"></span>
+        <button type="button" class="rm-btn" onclick="clearThread()">✕</button>
+      </span>
+    </div>
+  </div>
+  <button type="button" class="btn btn-primary" onclick="saveChannel()">Save</button>
 </div>
 
 <!-- ── Tracked Roles ── -->
 <div class="settings-section">
-  <h2>🎭 Tracked Roles <span style="font-size:0.75rem;color:var(--text-muted)">(highest position = highest priority)</span></h2>
-  <div class="role-list" id="role-list">
-    <%
-      const roles = Array.isArray(settings.tracked_roles) ? settings.tracked_roles : [];
-      roles.forEach((role, i) => {
-    %>
-      <div class="role-item" data-idx="<%= i %>">
-        <input type="text" name="role_id_<%= i %>" value="<%= role.id || '' %>" placeholder="Role ID" style="max-width:200px" />
-        <input type="text" name="role_name_<%= i %>" value="<%= role.name || '' %>" placeholder="Display name" />
-        <input type="number" name="role_pos_<%= i %>" value="<%= role.position !== undefined ? role.position : i %>" placeholder="Position" style="max-width:90px" />
-        <button type="button" class="rm-btn" onclick="removeRole(this)">✕</button>
-      </div>
-    <% }) %>
+  <h2>Tracked Roles</h2>
+  <div id="loading-roles" style="color:var(--text-muted);font-size:0.85rem;margin-bottom:0.5rem">Loading roles…</div>
+  <div id="roles-error" class="alert alert-error" style="display:none"></div>
+  <div class="picker-wrap">
+    <input type="text" id="role-search" placeholder="Search roles…" autocomplete="off" />
+    <div id="role-suggestions" class="suggestions-dropdown" style="display:none"></div>
   </div>
-  <button type="button" class="btn btn-primary" onclick="addRole()" style="margin-right:0.5rem">+ Add Role</button>
+  <div class="role-list" id="role-list"></div>
   <button type="button" class="btn btn-primary" onclick="saveRoles()">Save Roles</button>
 </div>
 
 <!-- ── Multi-vote Mode ── -->
 <div class="settings-section">
-  <h2>🗳️ Multi-vote Counting Mode</h2>
+  <h2>Multi-vote Counting Mode</h2>
   <form id="form-mode">
     <div style="display:flex;flex-direction:column;gap:0.6rem;margin-bottom:1rem">
       <% ['highest','lowest','average','ignore'].forEach(mode => { %>
@@ -55,7 +135,7 @@
               <% if (mode === 'highest') { %> — count only the highest emoji from each voter per post
               <% } else if (mode === 'lowest') { %> — count only the lowest emoji from each voter per post
               <% } else if (mode === 'average') { %> — average all emojis from each voter per post
-              <% } else { %> — count distinct voters only, ignore values
+              <% } else { %> — if a member reacts with multiple emojis under a single post, their vote is not counted
               <% } %>
             </span>
           </span>
@@ -68,16 +148,19 @@
 
 <!-- ── Vote Emojis ── -->
 <div class="settings-section">
-  <h2>🎯 Vote Emojis (in order, value 0–4)</h2>
+  <h2>Vote Emojis (in order, value 0–4)</h2>
   <form id="form-emojis">
     <div class="emoji-row">
       <%
         const emojis = Array.isArray(settings.vote_emojis) ? settings.vote_emojis : ['🧊','🌤️','⚡','🔥','💥'];
+        const emojiWeights = Array.isArray(settings.vote_emoji_weights) ? settings.vote_emoji_weights : [0,1,2,3,4];
         emojis.forEach((emoji, i) => {
       %>
         <div class="form-group">
           <label>Value <%= i %></label>
           <input type="text" name="emoji_<%= i %>" value="<%= emoji %>" maxlength="8" style="text-align:center;font-size:1.3rem" />
+          <label style="margin-top:0.4rem">Weight</label>
+          <input type="number" name="emoji_weight_<%= i %>" value="<%= emojiWeights[i] !== undefined ? emojiWeights[i] : i %>" step="0.1" min="0" />
         </div>
       <% }) %>
     </div>
@@ -87,7 +170,7 @@
 
 <!-- ── Change Password ── -->
 <div class="settings-section">
-  <h2>🔒 Change Dashboard Password</h2>
+  <h2>Change Dashboard Password</h2>
   <form id="form-password">
     <div class="form-group">
       <label for="currentPassword">Current Password</label>
@@ -106,6 +189,8 @@
 
 <script>
 const CSRF_TOKEN = '<%= locals.csrfToken %>';
+const INITIAL_ROLES = <%- JSON.stringify(Array.isArray(settings.tracked_roles) ? settings.tracked_roles : []) %>;
+const INITIAL_FORUM_ID = <%- JSON.stringify(settings.tracked_forum_id || '') %>;
 
 function showMsg(text, isError) {
   const el = document.getElementById('save-msg');
@@ -124,15 +209,276 @@ async function apiPost(url, data) {
   return res.json();
 }
 
-// Save forum channel
-document.getElementById('form-channel').addEventListener('submit', async e => {
-  e.preventDefault();
-  const val = document.getElementById('tracked_forum_id').value.trim();
-  const r = await apiPost('/api/settings', { tracked_forum_id: val });
-  showMsg(r.ok ? 'Channel saved!' : (r.error || 'Error'), !r.ok);
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function colorToHex(color) {
+  if (!color) return null;
+  return '#' + color.toString(16).padStart(6, '0');
+}
+
+// ── Generic suggestion helpers ──────────────────────────────────────────────
+
+function showSuggestions(dropId, items, onSelect) {
+  const dropdown = document.getElementById(dropId);
+  dropdown.innerHTML = '';
+  if (!items.length) { dropdown.style.display = 'none'; return; }
+  items.forEach(item => {
+    const div = document.createElement('div');
+    div.className = 'suggestion-item';
+    div.textContent = item.name;
+    div.addEventListener('mousedown', e => { e.preventDefault(); onSelect(item); });
+    dropdown.appendChild(div);
+  });
+  dropdown.style.display = 'block';
+}
+
+function hideSuggestions(dropId) {
+  const el = document.getElementById(dropId);
+  if (el) el.style.display = 'none';
+}
+
+// ── Role picker ─────────────────────────────────────────────────────────────
+
+let allRoles = [];
+let selectedRoles = [];
+
+async function loadRoles() {
+  const loadingEl = document.getElementById('loading-roles');
+  const errEl = document.getElementById('roles-error');
+  loadingEl.style.display = 'block';
+  errEl.style.display = 'none';
+  try {
+    const res = await fetch('/api/discord/roles');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    allRoles = data.roles || [];
+    loadingEl.style.display = 'none';
+  } catch {
+    loadingEl.style.display = 'none';
+    errEl.textContent = 'Failed to load roles from Discord.';
+    errEl.style.display = 'block';
+  }
+  initSelectedRoles();
+}
+
+function initSelectedRoles() {
+  selectedRoles = INITIAL_ROLES.map(r => {
+    const match = allRoles.find(ar => ar.id === r.id);
+    return {
+      id: r.id,
+      name: r.name || (match ? match.name : r.id),
+      color: match ? (match.color || 0) : 0,
+      position: r.position !== undefined ? r.position : (match ? (match.position || 0) : 0),
+      weight: (typeof r.weight === 'number' && r.weight >= 0) ? r.weight : 1,
+    };
+  });
+  renderSelectedRoles();
+}
+
+function renderSelectedRoles() {
+  const list = document.getElementById('role-list');
+  list.innerHTML = '';
+  selectedRoles.forEach((role, i) => {
+    const hex = colorToHex(role.color);
+    const dotStyle = hex ? `background:${hex}` : 'background:var(--text-muted)';
+    const div = document.createElement('div');
+    div.className = 'role-item';
+    const safeId = escapeHtml(role.id);
+    div.innerHTML =
+      `<span class="color-dot" style="${dotStyle}"></span>` +
+      `<span style="flex:1;font-size:0.9rem">${escapeHtml(role.name)}</span>` +
+      `<label style="font-size:0.82rem;color:var(--text-muted);margin:0;white-space:nowrap;display:flex;align-items:center;gap:0.3rem">` +
+        `Weight` +
+        `<input type="number" value="${role.weight}" step="0.1" min="0" style="width:70px;margin:0"` +
+          ` oninput="updateRoleWeight('${safeId}', this.value)" />` +
+      `</label>` +
+      `<button type="button" class="rm-btn" onclick="removeSelectedRole(${i})">✕</button>`;
+    list.appendChild(div);
+  });
+}
+
+function updateRoleWeight(id, val) {
+  const role = selectedRoles.find(r => r.id === id);
+  if (role) role.weight = Math.max(0, parseFloat(val) || 0);
+}
+
+function removeSelectedRole(i) {
+  selectedRoles.splice(i, 1);
+  renderSelectedRoles();
+}
+
+document.getElementById('role-search').addEventListener('input', function () {
+  const q = this.value.toLowerCase();
+  if (!q) { hideSuggestions('role-suggestions'); return; }
+  const filtered = allRoles
+    .filter(r => r.name.toLowerCase().startsWith(q) && !selectedRoles.some(s => s.id === r.id))
+    .slice(0, 8);
+  showSuggestions('role-suggestions', filtered, selectRole);
 });
 
-// Save multi-vote mode
+document.getElementById('role-search').addEventListener('blur', () => {
+  setTimeout(() => hideSuggestions('role-suggestions'), 150);
+});
+
+function selectRole(role) {
+  if (selectedRoles.some(r => r.id === role.id)) return;
+  selectedRoles.push({ id: role.id, name: role.name, color: role.color || 0, position: role.position || 0, weight: 1 });
+  renderSelectedRoles();
+  document.getElementById('role-search').value = '';
+  hideSuggestions('role-suggestions');
+}
+
+async function saveRoles() {
+  const roles = selectedRoles
+    .map(r => ({ id: r.id, name: r.name, position: r.position, weight: r.weight }))
+    .sort((a, b) => b.position - a.position);
+  const r = await apiPost('/api/settings', { tracked_roles: roles });
+  showMsg(r.ok ? 'Roles saved!' : (r.error || 'Error'), !r.ok);
+}
+
+// ── Channel picker ───────────────────────────────────────────────────────────
+
+let allChannels = [];
+let selectedChannel = null;
+let allThreads = [];
+let selectedThread = null;
+let _initialThreadPrePopDone = false;
+
+async function loadChannels() {
+  const loadingEl = document.getElementById('loading-channels');
+  const errEl = document.getElementById('channels-error');
+  loadingEl.style.display = 'block';
+  errEl.style.display = 'none';
+  try {
+    const res = await fetch('/api/discord/channels');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    allChannels = data.channels || [];
+    loadingEl.style.display = 'none';
+    if (INITIAL_FORUM_ID) {
+      const match = allChannels.find(c => c.id === INITIAL_FORUM_ID);
+      if (match) {
+        setSelectedChannel(match, false);
+        fetchThreads(match.id);
+      }
+    }
+  } catch {
+    loadingEl.style.display = 'none';
+    errEl.textContent = 'Failed to load channels from Discord.';
+    errEl.style.display = 'block';
+  }
+}
+
+function setSelectedChannel(channel, clearThreadState) {
+  selectedChannel = channel;
+  if (clearThreadState !== false) { selectedThread = null; updateThreadChip(); }
+  document.getElementById('selected-channel-name').textContent = '#' + channel.name;
+  document.getElementById('selected-channel-wrap').style.display = '';
+  document.getElementById('channel-search').value = '';
+  hideSuggestions('channel-suggestions');
+  document.getElementById('thread-section').style.display = '';
+}
+
+function clearChannel() {
+  selectedChannel = null;
+  selectedThread = null;
+  allThreads = [];
+  document.getElementById('selected-channel-wrap').style.display = 'none';
+  document.getElementById('thread-section').style.display = 'none';
+  updateThreadChip();
+}
+
+document.getElementById('channel-search').addEventListener('input', function () {
+  const q = this.value.toLowerCase();
+  if (!q) { hideSuggestions('channel-suggestions'); return; }
+  const filtered = allChannels
+    .filter(c => c.name.toLowerCase().startsWith(q))
+    .slice(0, 8);
+  showSuggestions('channel-suggestions', filtered, ch => {
+    setSelectedChannel(ch);
+    fetchThreads(ch.id);
+  });
+});
+
+document.getElementById('channel-search').addEventListener('blur', () => {
+  setTimeout(() => hideSuggestions('channel-suggestions'), 150);
+});
+
+async function fetchThreads(channelId) {
+  const loadingEl = document.getElementById('loading-threads');
+  const errEl = document.getElementById('threads-error');
+  const searchInput = document.getElementById('thread-search');
+  loadingEl.style.display = 'block';
+  errEl.style.display = 'none';
+  searchInput.value = '';
+  allThreads = [];
+  try {
+    const res = await fetch('/api/discord/threads?channelId=' + encodeURIComponent(channelId));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    allThreads = data.threads || [];
+    loadingEl.style.display = 'none';
+    if (!_initialThreadPrePopDone) {
+      _initialThreadPrePopDone = true;
+      if (INITIAL_FORUM_ID && INITIAL_FORUM_ID !== channelId) {
+        const threadMatch = allThreads.find(t => t.id === INITIAL_FORUM_ID);
+        if (threadMatch) selectThread(threadMatch);
+      }
+    }
+  } catch {
+    loadingEl.style.display = 'none';
+    errEl.textContent = 'Failed to load threads.';
+    errEl.style.display = 'block';
+  }
+}
+
+document.getElementById('thread-search').addEventListener('input', function () {
+  const q = this.value.toLowerCase();
+  if (!q) { hideSuggestions('thread-suggestions'); return; }
+  const filtered = allThreads
+    .filter(t => t.name.toLowerCase().startsWith(q))
+    .slice(0, 8);
+  showSuggestions('thread-suggestions', filtered, selectThread);
+});
+
+document.getElementById('thread-search').addEventListener('blur', () => {
+  setTimeout(() => hideSuggestions('thread-suggestions'), 150);
+});
+
+function selectThread(thread) {
+  selectedThread = thread;
+  updateThreadChip();
+  document.getElementById('thread-search').value = '';
+  hideSuggestions('thread-suggestions');
+}
+
+function clearThread() {
+  selectedThread = null;
+  updateThreadChip();
+}
+
+function updateThreadChip() {
+  const wrap = document.getElementById('selected-thread-wrap');
+  if (selectedThread) {
+    document.getElementById('selected-thread-name').textContent = selectedThread.name;
+    wrap.style.display = '';
+  } else {
+    wrap.style.display = 'none';
+  }
+}
+
+async function saveChannel() {
+  const id = selectedThread ? selectedThread.id : (selectedChannel ? selectedChannel.id : '');
+  const r = await apiPost('/api/settings', { tracked_forum_id: id });
+  showMsg(r.ok ? 'Channel saved!' : (r.error || 'Error'), !r.ok);
+}
+
+// ── Multi-vote mode ──────────────────────────────────────────────────────────
+
 document.getElementById('form-mode').addEventListener('submit', async e => {
   e.preventDefault();
   const mode = document.querySelector('input[name="multi_vote_mode"]:checked')?.value;
@@ -140,53 +486,21 @@ document.getElementById('form-mode').addEventListener('submit', async e => {
   showMsg(r.ok ? 'Mode saved!' : (r.error || 'Error'), !r.ok);
 });
 
-// Save emojis
+// ── Emojis ───────────────────────────────────────────────────────────────────
+
 document.getElementById('form-emojis').addEventListener('submit', async e => {
   e.preventDefault();
-  const emojis = [0,1,2,3,4].map(i => document.querySelector(`input[name="emoji_${i}"]`).value.trim());
-  const r = await apiPost('/api/settings', { vote_emojis: emojis });
+  const vote_emojis = [0,1,2,3,4].map(i => document.querySelector(`input[name="emoji_${i}"]`).value.trim());
+  const vote_emoji_weights = [0,1,2,3,4].map(i => {
+    const v = parseFloat(document.querySelector(`input[name="emoji_weight_${i}"]`).value);
+    return (isFinite(v) && v >= 0) ? v : i;
+  });
+  const r = await apiPost('/api/settings', { vote_emojis, vote_emoji_weights });
   showMsg(r.ok ? 'Emojis saved!' : (r.error || 'Error'), !r.ok);
 });
 
-// Roles helpers
-let roleIdx = <%= Array.isArray(settings.tracked_roles) ? settings.tracked_roles.length : 0 %>;
+// ── Password ─────────────────────────────────────────────────────────────────
 
-function addRole() {
-  const list = document.getElementById('role-list');
-  const div = document.createElement('div');
-  div.className = 'role-item';
-  div.dataset.idx = roleIdx;
-  div.innerHTML = `
-    <input type="text" name="role_id_${roleIdx}" value="" placeholder="Role ID" style="max-width:200px" />
-    <input type="text" name="role_name_${roleIdx}" value="" placeholder="Display name" />
-    <input type="number" name="role_pos_${roleIdx}" value="${roleIdx}" placeholder="Position" style="max-width:90px" />
-    <button type="button" class="rm-btn" onclick="removeRole(this)">✕</button>
-  `;
-  list.appendChild(div);
-  roleIdx++;
-}
-
-function removeRole(btn) {
-  btn.closest('.role-item').remove();
-}
-
-async function saveRoles() {
-  const items = document.querySelectorAll('.role-item');
-  const roles = [];
-  items.forEach(item => {
-    const idx = item.dataset.idx;
-    const id = item.querySelector(`input[name="role_id_${idx}"]`).value.trim();
-    const name = item.querySelector(`input[name="role_name_${idx}"]`).value.trim();
-    const position = parseInt(item.querySelector(`input[name="role_pos_${idx}"]`).value) || 0;
-    if (id) roles.push({ id, name, position });
-  });
-  // Sort by position descending (highest first)
-  roles.sort((a, b) => b.position - a.position);
-  const r = await apiPost('/api/settings', { tracked_roles: roles });
-  showMsg(r.ok ? 'Roles saved!' : (r.error || 'Error'), !r.ok);
-}
-
-// Change password
 document.getElementById('form-password').addEventListener('submit', async e => {
   e.preventDefault();
   const currentPassword = document.getElementById('currentPassword').value;
@@ -203,6 +517,11 @@ document.getElementById('form-password').addEventListener('submit', async e => {
     msg.style.color = 'var(--danger)';
   }
 });
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+
+loadRoles();
+loadChannels();
 </script>
 
 <%- include('partials/footer') %>
