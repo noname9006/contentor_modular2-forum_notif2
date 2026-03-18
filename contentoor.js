@@ -6,8 +6,6 @@ const ActivityStore = require('./activityStore');
 const ThreadCleaner = require('./scheduler');
 const { logWithTimestamp } = require('./utils');
 const { DB_TIMEOUT, RATE_LIMIT_MAX_REQUESTS, RATE_LIMIT_COOLDOWN, ROLE_TO_THREAD_ENABLED, THREAD_CLEANUP_SCHEDULE } = require('./config');
-const { initDb, getDb } = require('./voting/db');
-const VoteHandler = require('./voting/voteHandler');
 
 const client = new Client({
     intents: [
@@ -15,9 +13,8 @@ const client = new Client({
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildMembers,
-        GatewayIntentBits.GuildMessageReactions,
     ],
-    partials: [Partials.Message, Partials.Channel, Partials.User, Partials.Reaction]
+    partials: [Partials.Message, Partials.Channel, Partials.User]
 });
 
 // Constants
@@ -635,7 +632,6 @@ const urlStore = new UrlStorage();
 const urlTracker = new UrlTracker(client, urlStore); // Pass the existing instance
 const activityStore = new ActivityStore();
 const threadCleaner = new ThreadCleaner(client, activityStore);
-let voteHandler = null;
 
 client.once('ready', async () => {
     try {
@@ -664,13 +660,6 @@ client.once('ready', async () => {
             logWithTimestamp('Failed to initialize thread cleaner', 'ERROR');
         }
         logWithTimestamp(`ROLE_TO_THREAD routing: ${ROLE_TO_THREAD_ENABLED ? 'enabled' : 'disabled'}`, 'CONFIG');
-
-        // Initialize vote handler
-        await initDb();
-        voteHandler = new VoteHandler(client, getDb());
-        await voteHandler.init();
-        voteHandler.registerEvents();
-        logWithTimestamp('Vote handler initialized', 'STARTUP');
         
     } catch (error) {
         logWithTimestamp(`Initialization error: ${error.message}`, 'FATAL');
@@ -774,7 +763,6 @@ process.on('unhandledRejection', async (reason, promise) => {
 
 process.on('SIGINT', () => {
     logWithTimestamp('Shutting down...', 'SHUTDOWN');
-    if (voteHandler) voteHandler.shutdown();
     activityStore.shutdown();
     threadCleaner.stop();
     urlStore.shutdown();
@@ -785,7 +773,6 @@ process.on('SIGINT', () => {
 
 process.on('SIGTERM', () => {
     logWithTimestamp('Shutting down...', 'SHUTDOWN');
-    if (voteHandler) voteHandler.shutdown();
     activityStore.shutdown();
     threadCleaner.stop();
     urlStore.shutdown();
