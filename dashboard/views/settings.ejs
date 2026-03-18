@@ -90,20 +90,7 @@
       <button type="button" class="rm-btn" onclick="clearChannel()">✕</button>
     </span>
   </div>
-  <div id="thread-section" style="display:none">
-    <div id="loading-threads" style="color:var(--text-muted);font-size:0.85rem;margin-bottom:0.5rem;display:none">Loading threads…</div>
-    <div id="threads-error" class="alert alert-error" style="display:none"></div>
-    <div class="picker-wrap">
-      <input type="text" id="thread-search" placeholder="Filter threads (optional)…" autocomplete="off" />
-      <div id="thread-suggestions" class="suggestions-dropdown" style="display:none"></div>
-    </div>
-    <div id="selected-thread-wrap" style="display:none;margin-bottom:0.8rem">
-      <span class="chip">
-        <span id="selected-thread-name"></span>
-        <button type="button" class="rm-btn" onclick="clearThread()">✕</button>
-      </span>
-    </div>
-  </div>
+
   <button type="button" class="btn btn-primary" onclick="saveChannel()">Save</button>
 </div>
 
@@ -350,9 +337,6 @@ async function saveRoles() {
 
 let allChannels = [];
 let selectedChannel = null;
-let allThreads = [];
-let selectedThread = null;
-let _initialThreadPrePopDone = false;
 
 async function loadChannels() {
   const loadingEl = document.getElementById('loading-channels');
@@ -368,34 +352,59 @@ async function loadChannels() {
     if (INITIAL_FORUM_ID) {
       const match = allChannels.find(c => c.id === INITIAL_FORUM_ID);
       if (match) {
-        setSelectedChannel(match, false);
-        fetchThreads(match.id);
+        setSelectedChannel(match);
+      } else if (allChannels.length > 0) {
+        // Saved ID not found as a top-level channel — may be a thread ID from a previous save.
+        // Search all forum channels (type 15) to locate the parent channel.
+        const forumChannels = allChannels.filter(c => c.type === 15);
+        let found = false;
+        for (const fc of forumChannels) {
+          try {
+            const tr = await fetch('/api/discord/threads?channelId=' + encodeURIComponent(fc.id));
+            if (tr.ok) {
+              const tData = await tr.json();
+              if ((tData.threads || []).some(t => t.id === INITIAL_FORUM_ID)) {
+                setSelectedChannel(fc);
+                found = true;
+                break;
+              }
+            }
+          } catch (e) { /* thread fetch failed for this forum channel — skip and try next */ }
+        }
+        if (!found) {
+          showFallbackChannel(INITIAL_FORUM_ID);
+        }
+      } else {
+        showFallbackChannel(INITIAL_FORUM_ID);
       }
     }
   } catch {
     loadingEl.style.display = 'none';
-    errEl.textContent = 'Failed to load channels from Discord.';
+    errEl.textContent = 'Failed to load channels from Discord. Showing saved value.';
     errEl.style.display = 'block';
+    if (INITIAL_FORUM_ID) {
+      showFallbackChannel(INITIAL_FORUM_ID);
+    }
   }
 }
 
-function setSelectedChannel(channel, clearThreadState) {
+function showFallbackChannel(id) {
+  selectedChannel = { id, name: id };
+  document.getElementById('selected-channel-name').textContent = id + ' (saved ID, channel name unavailable)';
+  document.getElementById('selected-channel-wrap').style.display = '';
+}
+
+function setSelectedChannel(channel) {
   selectedChannel = channel;
-  if (clearThreadState !== false) { selectedThread = null; updateThreadChip(); }
   document.getElementById('selected-channel-name').textContent = '#' + channel.name;
   document.getElementById('selected-channel-wrap').style.display = '';
   document.getElementById('channel-search').value = '';
   hideSuggestions('channel-suggestions');
-  document.getElementById('thread-section').style.display = '';
 }
 
 function clearChannel() {
   selectedChannel = null;
-  selectedThread = null;
-  allThreads = [];
   document.getElementById('selected-channel-wrap').style.display = 'none';
-  document.getElementById('thread-section').style.display = 'none';
-  updateThreadChip();
 }
 
 function showChannelSuggestions(q) {
@@ -404,7 +413,6 @@ function showChannelSuggestions(q) {
     .slice(0, 8);
   showSuggestions('channel-suggestions', filtered, ch => {
     setSelectedChannel(ch);
-    fetchThreads(ch.id);
   });
 }
 
@@ -420,77 +428,8 @@ document.getElementById('channel-search').addEventListener('blur', () => {
   setTimeout(() => hideSuggestions('channel-suggestions'), 150);
 });
 
-async function fetchThreads(channelId) {
-  const loadingEl = document.getElementById('loading-threads');
-  const errEl = document.getElementById('threads-error');
-  const searchInput = document.getElementById('thread-search');
-  loadingEl.style.display = 'block';
-  errEl.style.display = 'none';
-  searchInput.value = '';
-  allThreads = [];
-  try {
-    const res = await fetch('/api/discord/threads?channelId=' + encodeURIComponent(channelId));
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    allThreads = data.threads || [];
-    loadingEl.style.display = 'none';
-    if (!_initialThreadPrePopDone) {
-      _initialThreadPrePopDone = true;
-      if (INITIAL_FORUM_ID && INITIAL_FORUM_ID !== channelId) {
-        const threadMatch = allThreads.find(t => t.id === INITIAL_FORUM_ID);
-        if (threadMatch) selectThread(threadMatch);
-      }
-    }
-  } catch {
-    loadingEl.style.display = 'none';
-    errEl.textContent = 'Failed to load threads.';
-    errEl.style.display = 'block';
-  }
-}
-
-function showThreadSuggestions(q) {
-  const filtered = allThreads
-    .filter(t => !q || t.name.toLowerCase().includes(q))
-    .slice(0, 8);
-  showSuggestions('thread-suggestions', filtered, selectThread);
-}
-
-document.getElementById('thread-search').addEventListener('focus', function () {
-  showThreadSuggestions('');
-});
-
-document.getElementById('thread-search').addEventListener('input', function () {
-  showThreadSuggestions(this.value.toLowerCase());
-});
-
-document.getElementById('thread-search').addEventListener('blur', () => {
-  setTimeout(() => hideSuggestions('thread-suggestions'), 150);
-});
-
-function selectThread(thread) {
-  selectedThread = thread;
-  updateThreadChip();
-  document.getElementById('thread-search').value = '';
-  hideSuggestions('thread-suggestions');
-}
-
-function clearThread() {
-  selectedThread = null;
-  updateThreadChip();
-}
-
-function updateThreadChip() {
-  const wrap = document.getElementById('selected-thread-wrap');
-  if (selectedThread) {
-    document.getElementById('selected-thread-name').textContent = selectedThread.name;
-    wrap.style.display = '';
-  } else {
-    wrap.style.display = 'none';
-  }
-}
-
 async function saveChannel() {
-  const id = selectedThread ? selectedThread.id : (selectedChannel ? selectedChannel.id : '');
+  const id = selectedChannel ? selectedChannel.id : '';
   const r = await apiPost('/api/settings', { tracked_forum_id: id });
   showMsg(r.ok ? 'Channel saved!' : (r.error || 'Error'), !r.ok);
 }
