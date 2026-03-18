@@ -1,0 +1,208 @@
+<%- include('partials/header', { page: 'settings' }) %>
+
+<h1>Settings</h1>
+
+<% if (saved) { %>
+  <div class="alert alert-success">Settings saved successfully.</div>
+<% } %>
+
+<!-- ── Forum Channel ── -->
+<div class="settings-section">
+  <h2>📡 Tracked Forum Channel</h2>
+  <form id="form-channel">
+    <div class="form-group">
+      <label for="tracked_forum_id">Forum Channel ID</label>
+      <input type="text" id="tracked_forum_id" name="tracked_forum_id"
+             value="<%= settings.tracked_forum_id || '' %>"
+             placeholder="Enter Discord channel ID" />
+    </div>
+    <button type="submit" class="btn btn-primary">Save</button>
+  </form>
+</div>
+
+<!-- ── Tracked Roles ── -->
+<div class="settings-section">
+  <h2>🎭 Tracked Roles <span style="font-size:0.75rem;color:var(--text-muted)">(highest position = highest priority)</span></h2>
+  <div class="role-list" id="role-list">
+    <%
+      const roles = Array.isArray(settings.tracked_roles) ? settings.tracked_roles : [];
+      roles.forEach((role, i) => {
+    %>
+      <div class="role-item" data-idx="<%= i %>">
+        <input type="text" name="role_id_<%= i %>" value="<%= role.id || '' %>" placeholder="Role ID" style="max-width:200px" />
+        <input type="text" name="role_name_<%= i %>" value="<%= role.name || '' %>" placeholder="Display name" />
+        <input type="number" name="role_pos_<%= i %>" value="<%= role.position !== undefined ? role.position : i %>" placeholder="Position" style="max-width:90px" />
+        <button type="button" class="rm-btn" onclick="removeRole(this)">✕</button>
+      </div>
+    <% }) %>
+  </div>
+  <button type="button" class="btn btn-primary" onclick="addRole()" style="margin-right:0.5rem">+ Add Role</button>
+  <button type="button" class="btn btn-primary" onclick="saveRoles()">Save Roles</button>
+</div>
+
+<!-- ── Multi-vote Mode ── -->
+<div class="settings-section">
+  <h2>🗳️ Multi-vote Counting Mode</h2>
+  <form id="form-mode">
+    <div style="display:flex;flex-direction:column;gap:0.6rem;margin-bottom:1rem">
+      <% ['highest','lowest','average','ignore'].forEach(mode => { %>
+        <label style="display:flex;align-items:center;gap:0.6rem;cursor:pointer">
+          <input type="radio" name="multi_vote_mode" value="<%= mode %>"
+                 <%= settings.multi_vote_mode === mode ? 'checked' : '' %> />
+          <span>
+            <strong><%= mode %></strong>
+            <span style="color:var(--text-muted);font-size:0.8rem">
+              <% if (mode === 'highest') { %> — count only the highest emoji from each voter per post
+              <% } else if (mode === 'lowest') { %> — count only the lowest emoji from each voter per post
+              <% } else if (mode === 'average') { %> — average all emojis from each voter per post
+              <% } else { %> — count distinct voters only, ignore values
+              <% } %>
+            </span>
+          </span>
+        </label>
+      <% }) %>
+    </div>
+    <button type="submit" class="btn btn-primary">Save</button>
+  </form>
+</div>
+
+<!-- ── Vote Emojis ── -->
+<div class="settings-section">
+  <h2>🎯 Vote Emojis (in order, value 0–4)</h2>
+  <form id="form-emojis">
+    <div class="emoji-row">
+      <%
+        const emojis = Array.isArray(settings.vote_emojis) ? settings.vote_emojis : ['🧊','🌤️','⚡','🔥','💥'];
+        emojis.forEach((emoji, i) => {
+      %>
+        <div class="form-group">
+          <label>Value <%= i %></label>
+          <input type="text" name="emoji_<%= i %>" value="<%= emoji %>" maxlength="8" style="text-align:center;font-size:1.3rem" />
+        </div>
+      <% }) %>
+    </div>
+    <button type="submit" class="btn btn-primary">Save Emojis</button>
+  </form>
+</div>
+
+<!-- ── Change Password ── -->
+<div class="settings-section">
+  <h2>🔒 Change Dashboard Password</h2>
+  <form id="form-password">
+    <div class="form-group">
+      <label for="currentPassword">Current Password</label>
+      <input type="password" id="currentPassword" name="currentPassword" autocomplete="current-password" />
+    </div>
+    <div class="form-group">
+      <label for="newPassword">New Password <span style="color:var(--text-muted)">(min 8 characters)</span></label>
+      <input type="password" id="newPassword" name="newPassword" autocomplete="new-password" />
+    </div>
+    <button type="submit" class="btn btn-primary">Change Password</button>
+    <span id="pw-msg" style="margin-left:1rem;font-size:0.85rem"></span>
+  </form>
+</div>
+
+<div id="save-msg" style="display:none;position:fixed;bottom:1.5rem;right:1.5rem;background:var(--success);color:#fff;padding:10px 18px;border-radius:8px;font-size:0.9rem;z-index:999"></div>
+
+<script>
+const CSRF_TOKEN = '<%= locals.csrfToken %>';
+
+function showMsg(text, isError) {
+  const el = document.getElementById('save-msg');
+  el.textContent = text;
+  el.style.background = isError ? 'var(--danger)' : 'var(--success)';
+  el.style.display = 'block';
+  setTimeout(() => { el.style.display = 'none'; }, 3000);
+}
+
+async function apiPost(url, data) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN },
+    body: JSON.stringify(data)
+  });
+  return res.json();
+}
+
+// Save forum channel
+document.getElementById('form-channel').addEventListener('submit', async e => {
+  e.preventDefault();
+  const val = document.getElementById('tracked_forum_id').value.trim();
+  const r = await apiPost('/api/settings', { tracked_forum_id: val });
+  showMsg(r.ok ? 'Channel saved!' : (r.error || 'Error'), !r.ok);
+});
+
+// Save multi-vote mode
+document.getElementById('form-mode').addEventListener('submit', async e => {
+  e.preventDefault();
+  const mode = document.querySelector('input[name="multi_vote_mode"]:checked')?.value;
+  const r = await apiPost('/api/settings', { multi_vote_mode: mode });
+  showMsg(r.ok ? 'Mode saved!' : (r.error || 'Error'), !r.ok);
+});
+
+// Save emojis
+document.getElementById('form-emojis').addEventListener('submit', async e => {
+  e.preventDefault();
+  const emojis = [0,1,2,3,4].map(i => document.querySelector(`input[name="emoji_${i}"]`).value.trim());
+  const r = await apiPost('/api/settings', { vote_emojis: emojis });
+  showMsg(r.ok ? 'Emojis saved!' : (r.error || 'Error'), !r.ok);
+});
+
+// Roles helpers
+let roleIdx = <%= Array.isArray(settings.tracked_roles) ? settings.tracked_roles.length : 0 %>;
+
+function addRole() {
+  const list = document.getElementById('role-list');
+  const div = document.createElement('div');
+  div.className = 'role-item';
+  div.dataset.idx = roleIdx;
+  div.innerHTML = `
+    <input type="text" name="role_id_${roleIdx}" value="" placeholder="Role ID" style="max-width:200px" />
+    <input type="text" name="role_name_${roleIdx}" value="" placeholder="Display name" />
+    <input type="number" name="role_pos_${roleIdx}" value="${roleIdx}" placeholder="Position" style="max-width:90px" />
+    <button type="button" class="rm-btn" onclick="removeRole(this)">✕</button>
+  `;
+  list.appendChild(div);
+  roleIdx++;
+}
+
+function removeRole(btn) {
+  btn.closest('.role-item').remove();
+}
+
+async function saveRoles() {
+  const items = document.querySelectorAll('.role-item');
+  const roles = [];
+  items.forEach(item => {
+    const idx = item.dataset.idx;
+    const id = item.querySelector(`input[name="role_id_${idx}"]`).value.trim();
+    const name = item.querySelector(`input[name="role_name_${idx}"]`).value.trim();
+    const position = parseInt(item.querySelector(`input[name="role_pos_${idx}"]`).value) || 0;
+    if (id) roles.push({ id, name, position });
+  });
+  // Sort by position descending (highest first)
+  roles.sort((a, b) => b.position - a.position);
+  const r = await apiPost('/api/settings', { tracked_roles: roles });
+  showMsg(r.ok ? 'Roles saved!' : (r.error || 'Error'), !r.ok);
+}
+
+// Change password
+document.getElementById('form-password').addEventListener('submit', async e => {
+  e.preventDefault();
+  const currentPassword = document.getElementById('currentPassword').value;
+  const newPassword = document.getElementById('newPassword').value;
+  const msg = document.getElementById('pw-msg');
+  const r = await apiPost('/api/settings/password', { currentPassword, newPassword });
+  if (r.ok) {
+    msg.textContent = '✓ Password changed';
+    msg.style.color = 'var(--success)';
+    document.getElementById('currentPassword').value = '';
+    document.getElementById('newPassword').value = '';
+  } else {
+    msg.textContent = '✗ ' + (r.error || 'Error');
+    msg.style.color = 'var(--danger)';
+  }
+});
+</script>
+
+<%- include('partials/footer') %>

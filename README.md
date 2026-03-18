@@ -315,5 +315,83 @@ contentor_modular2-forum_notif2/
 ├── config.js           # Environment variable configuration
 ├── utils.js            # Utility helpers
 ├── package.json        # Project metadata and dependencies
-└── .env                # Environment variables (create this yourself)
+├── .env                # Environment variables (create this yourself)
+├── voting/
+│   ├── db.js           # SQLite initialization, schema, settings helpers
+│   ├── voteHandler.js  # Discord event handler for reactions and message tracking
+│   ├── userCache.js    # In-memory + DB username cache with 24h TTL
+│   └── roleHelper.js   # Resolve highest tracked role from DB settings
+├── dashboard/
+│   ├── server.js       # Express app, session auth, all routes
+│   ├── analytics.js    # SQL query functions for leaderboards and stats
+│   └── views/
+│       ├── login.ejs
+│       ├── leaderboard.ejs
+│       ├── posts.ejs
+│       ├── settings.ejs
+│       └── partials/
+│           ├── header.ejs
+│           └── footer.ejs
+└── start-dashboard.sh  # Quick-start script for the dashboard
 ```
+
+---
+
+## Voting System
+
+### Overview
+
+The voting module adds a content voting mechanism to the bot. When a user posts in the tracked forum channel, the bot automatically adds 5 reactions (🧊 → 🌤️ → ⚡ → 🔥 → 💥). Community members click these reactions to vote. All votes are persisted in a SQLite database (`voting.db`). A web dashboard provides leaderboards, post listings, and configuration.
+
+### Setup
+
+1. Install the new dependencies:
+   ```bash
+   npm install
+   ```
+
+2. Add the following variables to your `.env` file:
+   ```
+   # Path to the SQLite voting database
+   VOTING_DB_PATH=./voting.db
+
+   # Dashboard web server port (default: 3001)
+   DASHBOARD_PORT=3001
+
+   # Initial dashboard password (only used once to set the bcrypt hash — change via dashboard afterwards)
+   DASHBOARD_PASSWORD=changeme
+
+   # Random secret for session cookies — generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+   SESSION_SECRET=replace-with-random-string
+   ```
+
+3. Start the bot as usual — the voting module initialises automatically on `ready`.
+
+4. Start the dashboard (in a separate terminal or via pm2):
+   ```bash
+   bash start-dashboard.sh
+   # or
+   npm run dashboard
+   ```
+   Then open [http://localhost:3001](http://localhost:3001) in your browser.
+
+### Dashboard Settings
+
+| Setting | Description |
+|---|---|
+| **Tracked Forum Channel** | Discord ID of the forum channel to monitor for posts and votes |
+| **Tracked Roles** | List of roles (ID + name + position) used to capture the author's/voter's highest role at vote time |
+| **Multi-vote Counting Mode** | How to count multiple emojis from the same voter on the same post: `highest` (default), `lowest`, `average`, or `ignore` |
+| **Vote Emojis** | The 5 emojis used for voting (in order, value 0–4) |
+| **Change Password** | Update the dashboard login password |
+
+### Leaderboard Timeframes
+
+The leaderboard and posts view support the following timeframes: **24h**, **7 days**, **30 days**, **90 days**, **All time**.
+
+### Architecture
+
+- The **bot** writes to `voting.db` using `better-sqlite3` (synchronous, fast inserts/deletes).
+- The **dashboard** opens `voting.db` in **read-only** mode to avoid conflicts.
+- Settings changes via the dashboard take effect for the **next** event the bot processes (no restart needed for most settings; `tracked_forum_id` changes are picked up on each message).
+- The `DASHBOARD_PASSWORD` env var is only used to set the initial bcrypt hash on first run. After that it is ignored — change the password via the dashboard Settings page.
