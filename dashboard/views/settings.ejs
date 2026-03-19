@@ -94,6 +94,27 @@
   <button type="button" class="btn btn-primary" onclick="saveChannel()">Save</button>
 </div>
 
+<!-- ── Tracked Threads ── -->
+<div class="settings-section" id="thread-section" style="display:none">
+  <h2>Tracked Threads <span style="color:var(--text-muted);font-size:0.8rem">(optional — leave empty to track all threads)</span></h2>
+  <div id="loading-threads" style="color:var(--text-muted);font-size:0.85rem;margin-bottom:0.5rem;display:none">Loading threads…</div>
+  <div id="threads-error" class="alert alert-error" style="display:none"></div>
+  <div class="picker-wrap">
+    <input type="text" id="thread-search" placeholder="Search threads…" autocomplete="off" />
+    <div id="thread-suggestions" class="suggestions-dropdown" style="display:none"></div>
+  </div>
+  <div class="role-list" id="thread-list"></div>
+  <button type="button" class="btn btn-primary" onclick="saveThreads()">Save Threads</button>
+
+  <!-- Separate leaderboard toggle — shown only when 2+ threads selected -->
+  <div id="separate-lb-wrap" style="display:none;margin-top:1rem">
+    <label style="display:flex;align-items:center;gap:0.6rem;cursor:pointer">
+      <input type="checkbox" id="separate-lb-check" onchange="saveSeparateLeaderboard(this.checked)" />
+      <span>Separate leaderboard per thread</span>
+    </label>
+  </div>
+</div>
+
 <!-- ── Tracked Roles ── -->
 <div class="settings-section">
   <h2>Tracked Roles</h2>
@@ -178,6 +199,8 @@
 const CSRF_TOKEN = '<%= locals.csrfToken %>';
 const INITIAL_ROLES = <%- JSON.stringify(Array.isArray(settings.tracked_roles) ? settings.tracked_roles : []) %>;
 const INITIAL_FORUM_ID = <%- JSON.stringify(settings.tracked_forum_id || '') %>;
+const INITIAL_THREAD_IDS = <%- JSON.stringify(Array.isArray(settings.tracked_thread_ids) ? settings.tracked_thread_ids : []) %>;
+const INITIAL_SEPARATE = <%- JSON.stringify(settings.separate_leaderboards === true || settings.separate_leaderboards === 'true') %>;
 
 function showMsg(text, isError) {
   const el = document.getElementById('save-msg');
@@ -400,11 +423,18 @@ function setSelectedChannel(channel) {
   document.getElementById('selected-channel-wrap').style.display = '';
   document.getElementById('channel-search').value = '';
   hideSuggestions('channel-suggestions');
+  if (channel.type === 15) {
+    loadThreadsForChannel(channel.id);
+  } else {
+    document.getElementById('thread-section').style.display = 'none';
+  }
 }
 
 function clearChannel() {
   selectedChannel = null;
   document.getElementById('selected-channel-wrap').style.display = 'none';
+  document.getElementById('thread-section').style.display = 'none';
+  selectedThreads = [];
 }
 
 function showChannelSuggestions(q) {
@@ -475,10 +505,111 @@ document.getElementById('form-password').addEventListener('submit', async e => {
   }
 });
 
+// ── Thread picker ────────────────────────────────────────────────────────────
+
+let allThreads = [];
+let selectedThreads = [];
+
+async function loadThreadsForChannel(channelId) {
+  const section = document.getElementById('thread-section');
+  const loadingEl = document.getElementById('loading-threads');
+  const errEl = document.getElementById('threads-error');
+  allThreads = [];
+  section.style.display = '';
+  loadingEl.style.display = 'block';
+  errEl.style.display = 'none';
+  try {
+    const res = await fetch('/api/discord/threads?channelId=' + encodeURIComponent(channelId));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    allThreads = data.threads || [];
+    loadingEl.style.display = 'none';
+  } catch (e) {
+    loadingEl.style.display = 'none';
+    errEl.textContent = 'Failed to load threads.';
+    errEl.style.display = 'block';
+  }
+  initSelectedThreads();
+}
+
+function initSelectedThreads() {
+  selectedThreads = INITIAL_THREAD_IDS.map(t => {
+    const match = allThreads.find(at => at.id === t.id);
+    return { id: t.id, name: t.name || (match ? match.name : t.id) };
+  });
+  renderSelectedThreads();
+  updateSeparateLbVisibility();
+}
+
+function renderSelectedThreads() {
+  const list = document.getElementById('thread-list');
+  list.innerHTML = '';
+  selectedThreads.forEach((thread, i) => {
+    const div = document.createElement('div');
+    div.className = 'role-item';
+    div.innerHTML =
+      `<span style="flex:1;font-size:0.9rem">${escapeHtml(thread.name)}</span>` +
+      `<button type="button" class="rm-btn" onclick="removeSelectedThread(${i})">✕</button>`;
+    list.appendChild(div);
+  });
+  updateSeparateLbVisibility();
+}
+
+function updateSeparateLbVisibility() {
+  const wrap = document.getElementById('separate-lb-wrap');
+  wrap.style.display = selectedThreads.length >= 2 ? '' : 'none';
+  if (selectedThreads.length >= 2) {
+    document.getElementById('separate-lb-check').checked = INITIAL_SEPARATE;
+  }
+}
+
+function removeSelectedThread(i) {
+  selectedThreads.splice(i, 1);
+  renderSelectedThreads();
+}
+
+function showThreadSuggestions(q) {
+  const filtered = allThreads
+    .filter(t => (!q || t.name.toLowerCase().includes(q)) && !selectedThreads.some(s => s.id === t.id))
+    .slice(0, 8);
+  showSuggestions('thread-suggestions', filtered, selectThread);
+}
+
+document.getElementById('thread-search').addEventListener('focus', function () { showThreadSuggestions(''); });
+document.getElementById('thread-search').addEventListener('input', function () { showThreadSuggestions(this.value.toLowerCase()); });
+document.getElementById('thread-search').addEventListener('blur', () => { setTimeout(() => hideSuggestions('thread-suggestions'), 150); });
+
+function selectThread(thread) {
+  if (selectedThreads.some(t => t.id === thread.id)) return;
+  selectedThreads.push({ id: thread.id, name: thread.name });
+  renderSelectedThreads();
+  document.getElementById('thread-search').value = '';
+  hideSuggestions('thread-suggestions');
+}
+
+async function saveThreads() {
+  const threads = selectedThreads.map(t => ({ id: t.id, name: t.name }));
+  const r = await apiPost('/api/settings', { tracked_thread_ids: threads });
+  showMsg(r.ok ? 'Threads saved!' : (r.error || 'Error'), !r.ok);
+}
+
+async function saveSeparateLeaderboard(val) {
+  const r = await apiPost('/api/settings', { separate_leaderboards: val });
+  showMsg(r.ok ? 'Saved!' : (r.error || 'Error'), !r.ok);
+}
+
 // ── Init ─────────────────────────────────────────────────────────────────────
 
 loadRoles();
-loadChannels();
+loadChannels().then(() => {
+  if (INITIAL_FORUM_ID) {
+    loadThreadsForChannel(INITIAL_FORUM_ID);
+  }
+}).catch(() => {
+  if (INITIAL_FORUM_ID) {
+    loadThreadsForChannel(INITIAL_FORUM_ID);
+  }
+});
 </script>
 
 <%- include('partials/footer') %>

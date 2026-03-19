@@ -2,7 +2,7 @@
 
 <h1>Leaderboard</h1>
 
-<!-- Stat cards -->
+<!-- Stat cards (global) -->
 <div class="stat-grid">
   <div class="stat-card">
     <div class="label">Posts</div>
@@ -30,48 +30,82 @@
       <%= tf === '24h' ? '24h' : tf === '7d' ? '7 days' : tf === '30d' ? '30 days' : tf === '90d' ? '90 days' : 'All time' %>
     </a>
   <% }) %>
+  <a href="#" id="custom-range-toggle" class="<%= customRange ? 'active' : '' %>">Custom range</a>
 </div>
 
-<div class="two-col">
-  <!-- Top Voted Users -->
-  <div class="card">
-    <h2>🏆 Top Voted Users</h2>
-    <div class="table-wrap" style="margin-top:1rem;">
-      <table>
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>User</th>
-            <th>Score</th>
-            <th>Posts</th>
-          </tr>
-        </thead>
-        <tbody>
-          <% if (topVoted.length === 0) { %>
-            <tr><td colspan="4" style="color:var(--text-muted);text-align:center;padding:2rem;">No data yet</td></tr>
-          <% } %>
-          <% topVoted.forEach((u, i) => { %>
-            <tr>
-              <td style="color:var(--text-muted)"><%= i + 1 %></td>
-              <td>
-                <% if (u.avatarUrl) { %>
-                  <img src="<%= u.avatarUrl %>" class="avatar" alt="" />
-                <% } else { %>
-                  <span class="avatar-placeholder"></span>
-                <% } %>
-                <%= u.displayName %>
-              </td>
-              <td style="color:var(--accent);font-weight:700"><%= Number(u.score || 0).toFixed(1).replace(/\.0$/, '') %></td>
-              <td><%= u.postCount %></td>
-            </tr>
-          <% }) %>
-        </tbody>
-      </table>
-    </div>
+<!-- Custom date range panel -->
+<div id="custom-range-panel" style="<%= customRange ? '' : 'display:none' %>">
+  <div style="display:flex;align-items:center;gap:0.8rem;flex-wrap:wrap;padding:0.8rem 0">
+    <label>From <input type="date" id="cr-from" value="<%= customRange ? customRange.from : '' %>" /></label>
+    <label>To <input type="date" id="cr-to" value="<%= customRange ? customRange.to : '' %>" /></label>
+    <button type="button" class="btn btn-primary" onclick="applyCustomRange()">Apply</button>
+    <% if (customRange) { %>
+      <a href="/leaderboard" class="btn" style="background:var(--surface2);color:var(--text)">Clear</a>
+    <% } %>
   </div>
+</div>
 
-  <!-- Top Voters -->
-  <div class="card">
+<% if (leaderboardSections && leaderboardSections.length > 0) { %>
+  <!-- Per-thread leaderboard sections -->
+  <% leaderboardSections.forEach(section => { %>
+    <!-- Stat cards per thread -->
+    <div class="stat-grid" style="margin-top:1.5rem">
+      <div class="stat-card">
+        <div class="label">Posts — #<%= section.threadName %></div>
+        <div class="value"><%= section.stats.totalPosts %></div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Votes</div>
+        <div class="value"><%= section.stats.totalVotes %></div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Voters</div>
+        <div class="value"><%= section.stats.totalVoters %></div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Authors</div>
+        <div class="value"><%= section.stats.totalAuthors %></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:1rem">
+      <h2>🏆 Top Voted — #<%= section.threadName %></h2>
+      <div class="table-wrap" style="margin-top:1rem;">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>User</th>
+              <th>Score</th>
+              <th>Posts</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% if (section.topVoted.length === 0) { %>
+              <tr><td colspan="4" style="color:var(--text-muted);text-align:center;padding:2rem;">No data yet</td></tr>
+            <% } %>
+            <% section.topVoted.forEach((u, i) => { %>
+              <tr>
+                <td style="color:var(--text-muted)"><%= i + 1 %></td>
+                <td>
+                  <% if (u.avatarUrl) { %>
+                    <img src="<%= u.avatarUrl %>" class="avatar" alt="" />
+                  <% } else { %>
+                    <span class="avatar-placeholder"></span>
+                  <% } %>
+                  <%= u.displayName %>
+                </td>
+                <td style="color:var(--accent);font-weight:700"><%= Number(u.score || 0).toFixed(1).replace(/\.0$/, '') %></td>
+                <td><%= u.postCount %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  <% }) %>
+
+  <!-- Global Top Voters (rendered once after all sections) -->
+  <div class="card" style="margin-top:1.5rem">
     <h2>🗳️ Top Voters</h2>
     <div class="table-wrap" style="margin-top:1rem;">
       <table>
@@ -104,6 +138,96 @@
       </table>
     </div>
   </div>
-</div>
+
+<% } else { %>
+  <!-- Single global leaderboard -->
+  <div class="two-col">
+    <!-- Top Voted Users -->
+    <div class="card">
+      <h2>🏆 Top Voted Users</h2>
+      <div class="table-wrap" style="margin-top:1rem;">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>User</th>
+              <th>Score</th>
+              <th>Posts</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% if (topVoted.length === 0) { %>
+              <tr><td colspan="4" style="color:var(--text-muted);text-align:center;padding:2rem;">No data yet</td></tr>
+            <% } %>
+            <% topVoted.forEach((u, i) => { %>
+              <tr>
+                <td style="color:var(--text-muted)"><%= i + 1 %></td>
+                <td>
+                  <% if (u.avatarUrl) { %>
+                    <img src="<%= u.avatarUrl %>" class="avatar" alt="" />
+                  <% } else { %>
+                    <span class="avatar-placeholder"></span>
+                  <% } %>
+                  <%= u.displayName %>
+                </td>
+                <td style="color:var(--accent);font-weight:700"><%= Number(u.score || 0).toFixed(1).replace(/\.0$/, '') %></td>
+                <td><%= u.postCount %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Top Voters -->
+    <div class="card">
+      <h2>🗳️ Top Voters</h2>
+      <div class="table-wrap" style="margin-top:1rem;">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>User</th>
+              <th>Votes Cast</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% if (topVoters.length === 0) { %>
+              <tr><td colspan="3" style="color:var(--text-muted);text-align:center;padding:2rem;">No data yet</td></tr>
+            <% } %>
+            <% topVoters.forEach((u, i) => { %>
+              <tr>
+                <td style="color:var(--text-muted)"><%= i + 1 %></td>
+                <td>
+                  <% if (u.avatarUrl) { %>
+                    <img src="<%= u.avatarUrl %>" class="avatar" alt="" />
+                  <% } else { %>
+                    <span class="avatar-placeholder"></span>
+                  <% } %>
+                  <%= u.displayName %>
+                </td>
+                <td style="color:var(--accent);font-weight:700"><%= u.votesCast %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+<% } %>
+
+<script>
+function applyCustomRange() {
+  const from = document.getElementById('cr-from').value;
+  const to = document.getElementById('cr-to').value;
+  if (!from || !to) return;
+  window.location.href = '/leaderboard?from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to);
+}
+document.getElementById('custom-range-toggle').addEventListener('click', function(e) {
+  e.preventDefault();
+  const panel = document.getElementById('custom-range-panel');
+  panel.style.display = panel.style.display === 'none' ? '' : 'none';
+});
+</script>
 
 <%- include('partials/footer') %>

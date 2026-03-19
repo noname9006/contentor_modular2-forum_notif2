@@ -16,6 +16,7 @@ class VoteHandler {
         this.client = client;
         this.db = db;
         this.trackedForumId = null;
+        this.trackedThreadIds = [];
         this.voteEmojis = [];
         // Map of emoji string -> vote value (0-4)
         this.emojiToValue = new Map();
@@ -46,6 +47,8 @@ class VoteHandler {
         this.voteEmojis.forEach((emoji, idx) => {
             this.emojiToValue.set(emoji, idx);
         });
+        const threadIds = getSetting('tracked_thread_ids');
+        this.trackedThreadIds = Array.isArray(threadIds) ? threadIds.map(t => String(t.id || t)).filter(Boolean) : [];
     }
 
     /**
@@ -93,7 +96,12 @@ class VoteHandler {
         if (!this.trackedForumId) return false;
         if (!channel.isThread()) return false;
         const parent = await channel.parent?.fetch().catch(() => null);
-        return parent?.id === this.trackedForumId;
+        if (parent?.id !== this.trackedForumId) return false;
+        // If specific threads are configured, only accept those
+        if (this.trackedThreadIds.length > 0) {
+            return this.trackedThreadIds.includes(channel.id);
+        }
+        return true;
     }
 
     _getPost(messageId) {
