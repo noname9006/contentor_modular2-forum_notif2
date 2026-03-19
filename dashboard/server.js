@@ -125,7 +125,7 @@ function getAllSettings() {
 
 // Write helper — uses the shared writable connection.
 function writeSetting(key, value) {
-    const serialized = typeof value === 'string' ? value : JSON.stringify(value);
+    const serialized = JSON.stringify(value);
     dbWrite.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, serialized);
 }
 
