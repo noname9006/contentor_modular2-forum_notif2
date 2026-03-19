@@ -409,7 +409,7 @@ function clearChannel() {
 
 function showChannelSuggestions(q) {
   const filtered = allChannels
-    .filter(c => !q || c.name.toLowerCase().includes(q))
+    .filter(c => c.type === 15 && (!q || c.name.toLowerCase().includes(q)))
     .slice(0, 8);
   showSuggestions('channel-suggestions', filtered, ch => {
     setSelectedChannel(ch);
