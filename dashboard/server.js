@@ -13,10 +13,13 @@ const https = require('https');
 const {
     getTimeRange,
     getTopVotedUsers,
+    getTopVotedUsersByThread,
     getTopVoters,
     getPosts,
     getPostsCount,
     getStats,
+    getStatsByThread,
+    getTrackedThreadNames,
 } = require('./analytics');
 
 // ── Env validation ─────────────────────────────────────────────────────────────
@@ -213,14 +216,53 @@ app.get('/', requireAuth, (req, res) => res.redirect('/leaderboard'));
 
 // Leaderboard page
 app.get('/leaderboard', requireAuth, (req, res) => {
-    const timeframe = normalizeTimeframe(req.query.timeframe);
-    const { startMs, endMs } = getTimeRange(timeframe);
+    let startMs, endMs, timeframe, customRange;
 
-    const topVoted = getTopVotedUsers(db, startMs, endMs, 50);
+    const { from, to } = req.query;
+    const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+    if (from && to && dateRe.test(from) && dateRe.test(to)) {
+        startMs = new Date(from + 'T00:00:00').getTime();
+        endMs   = new Date(to   + 'T23:59:59.999').getTime();
+        if (isNaN(startMs) || isNaN(endMs)) {
+            timeframe = normalizeTimeframe(req.query.timeframe);
+            ({ startMs, endMs } = getTimeRange(timeframe));
+            customRange = null;
+        } else {
+            customRange = { from, to };
+            timeframe = 'custom';
+        }
+    } else {
+        timeframe = normalizeTimeframe(req.query.timeframe);
+        ({ startMs, endMs } = getTimeRange(timeframe));
+        customRange = null;
+    }
+
+    const separateLeaderboards = getSetting('separate_leaderboards');
+    const isSeparate = separateLeaderboards === true || separateLeaderboards === 'true';
+    const trackedThreads = getTrackedThreadNames(db);
+    const trackedThreadIds = trackedThreads.map(t => t.id);
+
+    let leaderboardSections = null;
+    let topVoted;
+
+    if (isSeparate && trackedThreadIds.length >= 2) {
+        leaderboardSections = trackedThreads.map(thread => ({
+            threadId: thread.id,
+            threadName: thread.name,
+            topVoted: getTopVotedUsersByThread(db, startMs, endMs, [thread.id], 50),
+            stats: getStatsByThread(db, startMs, endMs, [thread.id]),
+        }));
+        topVoted = [];
+    } else if (trackedThreadIds.length > 0) {
+        topVoted = getTopVotedUsersByThread(db, startMs, endMs, trackedThreadIds, 50);
+    } else {
+        topVoted = getTopVotedUsers(db, startMs, endMs, 50);
+    }
+
     const topVoters = getTopVoters(db, startMs, endMs, 50);
     const stats = getStats(db, startMs, endMs);
 
-    res.render('leaderboard', { topVoted, topVoters, stats, timeframe });
+    res.render('leaderboard', { topVoted, topVoters, stats, timeframe, customRange, leaderboardSections });
 });
 
 // Posts page
@@ -309,6 +351,26 @@ app.post('/api/settings', requireAuth, (req, res) => {
             writeSetting('vote_emoji_weights', weights);
         }
 
+        const { tracked_thread_ids, separate_leaderboards } = req.body;
+
+        if (tracked_thread_ids !== undefined) {
+            let threads;
+            if (typeof tracked_thread_ids === 'string') {
+                try { threads = JSON.parse(tracked_thread_ids); } catch { threads = []; }
+            } else {
+                threads = tracked_thread_ids;
+            }
+            if (!Array.isArray(threads)) threads = [];
+            threads = threads
+                .filter(t => t && typeof t.id === 'string' && t.id.trim() !== '')
+                .map(t => ({ id: String(t.id).trim(), name: String(t.name || t.id).trim() }));
+            writeSetting('tracked_thread_ids', threads);
+        }
+
+        if (separate_leaderboards !== undefined) {
+            writeSetting('separate_leaderboards', separate_leaderboards === true || separate_leaderboards === 'true');
+        }
+
         res.json({ ok: true });
     } catch (err) {
         console.error('Error saving settings:', err);
@@ -348,14 +410,32 @@ app.post('/api/settings/password', requireAuth, async (req, res) => {
 
 // JSON leaderboard (AJAX)
 app.get('/api/leaderboard', requireAuth, (req, res) => {
-    const timeframe = normalizeTimeframe(req.query.timeframe);
-    const { startMs, endMs } = getTimeRange(timeframe);
+    let startMs, endMs, timeframe, customRange;
+
+    const { from, to } = req.query;
+    const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+    if (from && to && dateRe.test(from) && dateRe.test(to)) {
+        startMs = new Date(from + 'T00:00:00').getTime();
+        endMs   = new Date(to   + 'T23:59:59.999').getTime();
+        if (isNaN(startMs) || isNaN(endMs)) {
+            timeframe = normalizeTimeframe(req.query.timeframe);
+            ({ startMs, endMs } = getTimeRange(timeframe));
+            customRange = null;
+        } else {
+            customRange = { from, to };
+            timeframe = 'custom';
+        }
+    } else {
+        timeframe = normalizeTimeframe(req.query.timeframe);
+        ({ startMs, endMs } = getTimeRange(timeframe));
+        customRange = null;
+    }
 
     const topVoted = getTopVotedUsers(db, startMs, endMs, 50);
     const topVoters = getTopVoters(db, startMs, endMs, 50);
     const stats = getStats(db, startMs, endMs);
 
-    res.json({ topVoted, topVoters, stats, timeframe });
+    res.json({ topVoted, topVoters, stats, timeframe, customRange });
 });
 
 // Discord roles

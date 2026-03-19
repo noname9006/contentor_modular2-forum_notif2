@@ -55,6 +55,7 @@ CREATE INDEX IF NOT EXISTS idx_votes_voted_at  ON votes(voted_at);
 CREATE INDEX IF NOT EXISTS idx_posts_author    ON posts(author_id);
 CREATE INDEX IF NOT EXISTS idx_posts_posted_at ON posts(posted_at);
 CREATE INDEX IF NOT EXISTS idx_posts_forum     ON posts(forum_channel_id);
+CREATE INDEX IF NOT EXISTS idx_posts_thread    ON posts(thread_id);
 `;
 
 const DEFAULT_SETTINGS = [
@@ -64,6 +65,8 @@ const DEFAULT_SETTINGS = [
     ['vote_emojis', JSON.stringify(['🧊', '🌤️', '⚡', '🔥', '💥'])],
     ['vote_emoji_weights', JSON.stringify([0, 1, 2, 3, 4])],
     ['dashboard_password_hash', ''],
+    ['tracked_thread_ids', '[]'],
+    ['separate_leaderboards', 'false'],
 ];
 
 async function initDb() {
