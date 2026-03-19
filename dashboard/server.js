@@ -223,8 +223,14 @@ app.get('/leaderboard', requireAuth, (req, res) => {
     if (from && to && dateRe.test(from) && dateRe.test(to)) {
         startMs = new Date(from + 'T00:00:00').getTime();
         endMs   = new Date(to   + 'T23:59:59.999').getTime();
-        customRange = { from, to };
-        timeframe = 'custom';
+        if (isNaN(startMs) || isNaN(endMs)) {
+            timeframe = normalizeTimeframe(req.query.timeframe);
+            ({ startMs, endMs } = getTimeRange(timeframe));
+            customRange = null;
+        } else {
+            customRange = { from, to };
+            timeframe = 'custom';
+        }
     } else {
         timeframe = normalizeTimeframe(req.query.timeframe);
         ({ startMs, endMs } = getTimeRange(timeframe));
@@ -411,8 +417,14 @@ app.get('/api/leaderboard', requireAuth, (req, res) => {
     if (from && to && dateRe.test(from) && dateRe.test(to)) {
         startMs = new Date(from + 'T00:00:00').getTime();
         endMs   = new Date(to   + 'T23:59:59.999').getTime();
-        customRange = { from, to };
-        timeframe = 'custom';
+        if (isNaN(startMs) || isNaN(endMs)) {
+            timeframe = normalizeTimeframe(req.query.timeframe);
+            ({ startMs, endMs } = getTimeRange(timeframe));
+            customRange = null;
+        } else {
+            customRange = { from, to };
+            timeframe = 'custom';
+        }
     } else {
         timeframe = normalizeTimeframe(req.query.timeframe);
         ({ startMs, endMs } = getTimeRange(timeframe));

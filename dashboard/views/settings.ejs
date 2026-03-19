@@ -538,7 +538,7 @@ function initSelectedThreads() {
     return { id: t.id, name: t.name || (match ? match.name : t.id) };
   });
   renderSelectedThreads();
-  updateSeparateLbVisibility();
+  updateSeparateLbVisibility(true);
 }
 
 function renderSelectedThreads() {
@@ -555,10 +555,10 @@ function renderSelectedThreads() {
   updateSeparateLbVisibility();
 }
 
-function updateSeparateLbVisibility() {
+function updateSeparateLbVisibility(isInit) {
   const wrap = document.getElementById('separate-lb-wrap');
   wrap.style.display = selectedThreads.length >= 2 ? '' : 'none';
-  if (selectedThreads.length >= 2) {
+  if (isInit && selectedThreads.length >= 2) {
     document.getElementById('separate-lb-check').checked = INITIAL_SEPARATE;
   }
 }
@@ -601,11 +601,7 @@ async function saveSeparateLeaderboard(val) {
 // ── Init ─────────────────────────────────────────────────────────────────────
 
 loadRoles();
-loadChannels().then(() => {
-  if (INITIAL_FORUM_ID) {
-    loadThreadsForChannel(INITIAL_FORUM_ID);
-  }
-}).catch(() => {
+loadChannels().finally(() => {
   if (INITIAL_FORUM_ID) {
     loadThreadsForChannel(INITIAL_FORUM_ID);
   }
