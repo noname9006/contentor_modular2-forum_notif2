@@ -138,6 +138,14 @@ class ThreadCleaner {
         const threadMembers = await thread.members.fetch();
         logWithTimestamp(`Checking ${threadMembers.size} members in thread ${thread.name} (${threadId})`, 'INFO');
 
+        if (roleMode && THREAD_USERS_THRESHOLD > 0) {
+            const eligibleMemberCount = threadMembers.size - (threadMembers.has(this.client.user.id) ? 1 : 0);
+            if (eligibleMemberCount < THREAD_USERS_THRESHOLD) {
+                logWithTimestamp(`Thread ${thread.name}: ${eligibleMemberCount} members below threshold ${THREAD_USERS_THRESHOLD}, skipping role-mismatch cleanup`, 'INFO');
+                return 0;
+            }
+        }
+
         let removedFromThread = 0;
 
         for (const [memberId] of threadMembers) {
